@@ -27,15 +27,15 @@ env = j2.Environment(loader=j2.FileSystemLoader(Path(__file__).parent / 'templat
                      keep_trailing_newline=True)
 
 templates = {
-    'interface_base': env.get_template('interface-Base.hpp.j2'),
-    'interface_exports': env.get_template('interface-Exports.hpp.j2'),
-    'interface_impl.hpp': env.get_template('interface-Impl.hpp.j2'),
-    'interface_impl.cpp': env.get_template('interface-Impl.cpp.j2'),
-    'module.hpp': env.get_template('module.hpp.j2'),
+    'interface.hpp': env.get_template('interface.hpp.j2'),
+    'interface.cpp': env.get_template('interface.cpp.j2'),
+    'interface_impl.hpp': env.get_template('interface_impl.hpp.j2'),
+    'interface_impl.cpp': env.get_template('interface_impl.cpp.j2'),
     'module.cpp': env.get_template('module.cpp.j2'),
-    'ld-ev.hpp': env.get_template('ld-ev.hpp.j2'),
+    'module.hpp': env.get_template('module.hpp.j2'),
     'ld-ev.cpp': env.get_template('ld-ev.cpp.j2'),
-    'cmakelists': env.get_template('CMakeLists.txt.j2')
+    'cmakelists': env.get_template('CMakeLists.txt.j2'),
+    'mod_deps.cmake': env.get_template('mod_deps.cmake.j2')
 }
 
 validators = {}
@@ -46,7 +46,7 @@ validators = {}
 def setup_jinja_env():
     env.globals['timestamp'] = datetime.utcnow()
     # FIXME (aw): which repo to use? everest or everest-framework?
-    env.globals['git'] = helpers.gather_git_info(everest_dir)
+    # env.globals['git'] = helpers.gather_git_info(everest_dir)
     env.filters['snake_case'] = helpers.snake_case
     env.filters['create_dummy_result'] = helpers.create_dummy_result
 
@@ -95,14 +95,17 @@ def generate_tmpl_data_for_module(module, module_def):
             type_info = helpers.build_type_info(conf_id, conf_info['type'])
             config.append(type_info)
 
+        if_def, last_mtime = load_interface_defintion(impl_info['interface'])
+        if_tmpl = generate_tmpl_data_for_if(impl_info['interface'], if_def)
+
         provides.append({
             'id': impl,
             'type': impl_info['interface'],
             'desc': impl_info['description'],
             'config': config,
-            'class_name': f'{impl_info["interface"]}Impl',
-            'base_class': f'{impl_info["interface"]}ImplBase',
-            'base_class_header': f'generated/{impl_info["interface"]}/Implementation.hpp'
+            'tmpl': if_tmpl,
+            'is_publishing': True if if_tmpl['vars'] else False,
+            'is_callable': True if if_tmpl['cmds'] else False
         })
 
     requires = []
@@ -115,27 +118,28 @@ def generate_tmpl_data_for_module(module, module_def):
             'id': requirement_id,
             'is_vector': is_vector,
             'type': req_info['interface'],
-            'class_name': f'{req_info["interface"]}Intf',
-            'exports_header': f'generated/{req_info["interface"]}/Interface.hpp'
         })
 
-    module_config = []
-    for conf_id, conf_info in module_def.get('config', {}).items():
-        type_info = helpers.build_type_info(conf_id, conf_info['type'])
-        module_config.append(type_info)
+    module_config = [helpers.build_type_info(conf_id, conf_info['type'])
+                     for conf_id, conf_info in module_def.get('config', {}).items()]
+
+    impl_configs = [impl for impl in provides if impl['config']]
 
     tmpl_data = {
         'info': {
             'name': module,
             'class_name': module,  # FIXME (aw): enforce capital case?
             'desc': module_def['description'],
-            'module_header': f'{module}.hpp',
-            'module_config': module_config,
-            'ld_ev_header': 'ld-ev.hpp',
             'enable_external_mqtt': module_def.get('enable_external_mqtt', False)
         },
         'provides': provides,
+        'publishing_provides': [impl for impl in provides if impl['is_publishing']],
+        'callable_provides': [impl for impl in provides if impl['is_callable']],
         'requires': requires,
+        'configs': {
+            'module': module_config,
+            'implementations': impl_configs
+        } if (module_config or impl_configs) else None,
     }
 
     return tmpl_data
@@ -153,7 +157,7 @@ def set_impl_specific_path_vars(tmpl_data, output_path):
         (impl['class_header'], impl['cpp_file_rel_path']) = construct_impl_file_paths(impl)
 
 
-def generate_module_loader_files(mod, output_dir):
+def generate_module_source_files(mod, output_dir):
     loader_files = []
 
     mod_path = everest_dir / f'modules/{mod}/manifest.json'
@@ -162,14 +166,14 @@ def generate_module_loader_files(mod, output_dir):
 
     set_impl_specific_path_vars(tmpl_data, mod_path.parent)
 
-    # ld-ev.hpp
-    tmpl_data['info']['hpp_guard'] = 'LD_EV_HPP'
+    # module.hpp
+    tmpl_data['info']['hpp_guard'] = 'MODULE_HPP'
 
     loader_files.append({
-        'filename': 'ld-ev.hpp',
-        'path': output_dir / mod / 'ld-ev.hpp',
-        'printable_name': f'{mod}/ld-ev.hpp',
-        'content': templates['ld-ev.hpp'].render(tmpl_data),
+        'filename': 'module.hpp',
+        'path': output_dir / mod / 'module.hpp',
+        'printable_name': f'{mod}/module.hpp',
+        'content': templates['module.hpp'].render(tmpl_data),
         'last_mtime': mod_path.stat().st_mtime
     })
 
@@ -182,11 +186,32 @@ def generate_module_loader_files(mod, output_dir):
         'last_mtime': mod_path.stat().st_mtime
     })
 
+    # FIXME (aw): needs to be refactored
+    template_mtime = Path(templates['mod_deps.cmake'].filename).stat().st_mtime
+
+    # mod_deps.cmake
+    loader_files.append({
+        'filename': 'mod_deps.cmake',
+        'path': output_dir / mod / 'mod_deps.cmake',
+        'printable_name': f'{mod}/mod_deps.cmake',
+        'content': templates['mod_deps.cmake'].render(tmpl_data),
+        'last_mtime': max(mod_path.stat().st_mtime, template_mtime)
+    })
+
+    # # manifest.h
+    # loader_files.append({
+    #     'filename': 'manifest.h',
+    #     'path': output_dir / mod / 'manifest.h',
+    #     'printable_name': f'{mod}/manifest.h',
+    #     'content': templates['ld-ev.cpp'].render(tmpl_data),
+    #     'last_mtime': mod_path.stat().st_mtime
+    # })
+
     return loader_files
 
 
-def generate_module_files(mod, update_flag):
-    mod_files = {'core': [], 'interfaces': []}
+def create_module_files(mod, update_flag):
+    mod_files = {'core': []}
     mod_path = everest_dir / f'modules/{mod}/manifest.json'
     mod_def = helpers.load_validated_module_def(mod_path, validators['module'])
 
@@ -211,102 +236,6 @@ def generate_module_files(mod, update_flag):
         }
     }
 
-    impl_hpp_blocks = {
-        'version': 'v1',
-        'format_str': '// ev@{uuid}:{version}',
-        'regex_str': '^(?P<indent>\s*)// ev@(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):(?P<version>.*)$',
-        'definitions': {
-            'add_headers': {
-                'id': '75ac1216-19eb-4182-a85c-820f1fc2c091',
-                'content': '// insert your custom include headers here'
-            },
-            'public_defs': {
-                'id': '8ea32d28-373f-4c90-ae5e-b4fcc74e2a61',
-                'content': '// insert your public definitions here'
-            },
-            'protected_defs': {
-                'id': 'd2d1847a-7b88-41dd-ad07-92785f06f5c4',
-                'content': '// insert your protected definitions here'
-            },
-            'private_defs': {
-                'id': '3370e4dd-95f4-47a9-aaec-ea76f34a66c9',
-                'content': '// insert your private definitions here'
-            },
-            'after_class': {
-                'id': '3d7da0ad-02c2-493d-9920-0bbbd56b9876',
-                'content': '// insert other definitions here'
-            }
-        }
-    }
-
-    mod_hpp_blocks = {
-        'version': 'v1',
-        'format_str': '// ev@{uuid}:{version}',
-        'regex_str': '^(?P<indent>\s*)// ev@(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):(?P<version>.*)$',
-        'definitions': {
-            'add_headers': {
-                'id': '4bf81b14-a215-475c-a1d3-0a484ae48918',
-                'content': '// insert your custom include headers here'
-            },
-            'public_defs': {
-                'id': '1fce4c5e-0ab8-41bb-90f7-14277703d2ac',
-                'content': '// insert your public definitions here'
-            },
-            'protected_defs': {
-                'id': '4714b2ab-a24f-4b95-ab81-36439e1478de',
-                'content': '// insert your protected definitions here'
-            },
-            'private_defs': {
-                'id': '211cfdbe-f69a-4cd6-a4ec-f8aaa3d1b6c8',
-                'content': '// insert your private definitions here'
-            },
-            'after_class': {
-                'id': '087e516b-124c-48df-94fb-109508c7cda9',
-                'content': '// insert other definitions here'
-            }
-        }
-    }
-
-    # provided interface implementations (impl cpp & hpp)
-    for impl in tmpl_data['provides']:
-        interface = impl['type']
-        (impl_hpp_file, impl_cpp_file) = construct_impl_file_paths(impl)
-
-        # load template data for interface
-        if_def, last_mtime = load_interface_defintion(interface)
-
-        if_tmpl_data = generate_tmpl_data_for_if(interface, if_def)
-
-        if_tmpl_data['info'].update({
-            'hpp_guard': helpers.snake_case(f'{impl["id"]}_{interface}').upper() + '_IMPL_HPP',
-            'config': impl['config'],
-            'class_name': interface + 'Impl',
-            'class_parent': interface + 'ImplBase',
-            'module_header': f'../{mod}.hpp',
-            'module_class': mod,
-            'interface_implementation_id': impl['id']
-        })
-
-        if_tmpl_data['info']['blocks'] = helpers.load_tmpl_blocks(
-            impl_hpp_blocks, output_path / impl_hpp_file, update_flag)
-
-        # FIXME (aw): time stamp should include parent interfaces modification dates
-        mod_files['interfaces'].append({
-            'abbr': f'{impl["id"]}.hpp',
-            'path': output_path / impl_hpp_file,
-            'printable_name': impl_hpp_file,
-            'content': templates['interface_impl.hpp'].render(if_tmpl_data),
-            'last_mtime': last_mtime
-        })
-
-        mod_files['interfaces'].append({
-            'abbr': f'{impl["id"]}.cpp',
-            'path': output_path / impl_cpp_file,
-            'printable_name': impl_cpp_file,
-            'content': templates['interface_impl.cpp'].render(if_tmpl_data),
-            'last_mtime': last_mtime
-        })
-
     cmakelists_file = output_path / 'CMakeLists.txt'
     tmpl_data['info']['blocks'] = helpers.load_tmpl_blocks(cmakelists_blocks, cmakelists_file, update_flag)
     mod_files['core'].append({
@@ -316,27 +245,16 @@ def generate_module_files(mod, update_flag):
         'last_mtime': mod_path.stat().st_mtime
     })
 
-    # module.hpp
-    tmpl_data['info']['hpp_guard'] = helpers.snake_case(mod).upper() + '_HPP'
-    mod_hpp_file = output_path / f'{mod}.hpp'
-    tmpl_data['info']['blocks'] = helpers.load_tmpl_blocks(mod_hpp_blocks, mod_hpp_file, update_flag)
-    mod_files['core'].append({
-        'abbr': 'module.hpp',
-        'path': mod_hpp_file,
-        'content': templates['module.hpp'].render(tmpl_data),
-        'last_mtime': mod_path.stat().st_mtime
-    })
-
-    # module.cpp
-    mod_cpp_file = output_path / f'{mod}.cpp'
+    module_cpp_file = output_path / 'module.cpp'
+    tmpl_data['info']['blocks'] = None
     mod_files['core'].append({
         'abbr': 'module.cpp',
-        'path': mod_cpp_file,
+        'path': module_cpp_file,
         'content': templates['module.cpp'].render(tmpl_data),
         'last_mtime': mod_path.stat().st_mtime
     })
 
-    for file_info in [*mod_files['core'], *mod_files['interfaces']]:
+    for file_info in mod_files['core']:
         file_info['printable_name'] = file_info['path'].relative_to(output_path)
 
     return mod_files
@@ -357,8 +275,8 @@ def load_interface_defintion(interface):
     return if_def, last_mtime
 
 
-def generate_interface_headers(interface, all_interfaces_flag, output_dir):
-    if_parts = {'base': None, 'exports': None}
+def generate_interface_source_files(interface, all_interfaces_flag, output_dir):
+    if_parts = {'hpp': None, 'cpp': None, 'impl_hpp': None, 'impl_cpp': None}
 
     try:
         if_def, last_mtime = load_interface_defintion(interface)
@@ -371,33 +289,42 @@ def generate_interface_headers(interface, all_interfaces_flag, output_dir):
 
     tmpl_data = generate_tmpl_data_for_if(interface, if_def)
 
-    output_path = output_dir / interface
-    output_path.mkdir(parents=True, exist_ok=True)
+    # requirement / export definitions
+    tmpl_data['info']['hpp_guard'] = f'GENERATED_INTERFACES_{helpers.snake_case(interface).upper()}_HPP'
 
-    # generate Base file (providers view)
-    tmpl_data['info']['hpp_guard'] = helpers.snake_case(interface).upper() + '_IMPLEMENTATION_HPP'
-    tmpl_data['info']['class_name'] = f'{interface}ImplBase'
-
-    base_file = output_path / 'Implementation.hpp'
-
-    if_parts['base'] = {
-        'path': base_file,
-        'content': templates['interface_base'].render(tmpl_data),
+    hpp_file = output_dir / f'{interface}.hpp'
+    if_parts['hpp'] = {
+        'path': hpp_file,
+        'content': templates['interface.hpp'].render(tmpl_data),
         'last_mtime': last_mtime,
-        'printable_name': base_file.relative_to(output_path.parent)
+        'printable_name': hpp_file.relative_to(output_dir.parent)
     }
 
-    # generate Exports file (users view)
-    tmpl_data['info']['hpp_guard'] = helpers.snake_case(interface).upper() + '_INTERFACE_HPP'
-    tmpl_data['info']['class_name'] = f'{interface}Intf'
-
-    exports_file = output_path / 'Interface.hpp'
-
-    if_parts['exports'] = {
-        'path': exports_file,
-        'content': templates['interface_exports'].render(tmpl_data),
+    cpp_file = output_dir / f'{interface}.cpp'
+    if_parts['cpp'] = {
+        'path': cpp_file,
+        'content': templates['interface.cpp'].render(tmpl_data),
         'last_mtime': last_mtime,
-        'printable_name': exports_file.relative_to(output_path.parent)
+        'printable_name': cpp_file.relative_to(output_dir.parent)
+    }
+
+    # implementation definitions
+    tmpl_data['info']['hpp_guard'] = f'GENERATED_INTERFACES_IMPL_{helpers.snake_case(interface).upper()}_HPP'
+
+    impl_hpp_file = output_dir / 'impl' / f'{interface}.hpp'
+    if_parts['impl_hpp'] = {
+        'path': impl_hpp_file,
+        'content': templates['interface_impl.hpp'].render(tmpl_data),
+        'last_mtime': last_mtime,
+        'printable_name': impl_hpp_file.relative_to(output_dir.parent)
+    }
+
+    impl_cpp_file = output_dir / 'impl' / f'{interface}.cpp'
+    if_parts['impl_cpp'] = {
+        'path': impl_cpp_file,
+        'content': templates['interface_impl.cpp'].render(tmpl_data),
+        'last_mtime': last_mtime,
+        'printable_name': impl_cpp_file.relative_to(output_dir.parent)
     }
 
     return if_parts
@@ -406,7 +333,7 @@ def generate_interface_headers(interface, all_interfaces_flag, output_dir):
 def module_create(args):
     create_strategy = 'force-create' if args.force else 'create'
 
-    mod_files = generate_module_files(args.module, False)
+    mod_files = create_module_files(args.module, False)
 
     if args.only == 'which':
         helpers.print_available_mod_files(mod_files)
@@ -418,7 +345,7 @@ def module_create(args):
             print(err)
             return
 
-    for file_info in mod_files['core'] + mod_files['interfaces']:
+    for file_info in mod_files['core']:
         if not args.disable_clang_format:
             helpers.clang_format(args.clang_format_file, file_info)
 
@@ -432,7 +359,7 @@ def module_update(args):
         update_strategy[file_name] = primary_update_strategy
 
     # FIXME (aw): refactor out this only handling and rename it properly
-    mod_files = generate_module_files(args.module, True)
+    mod_files = create_module_files(args.module, True)
 
     if args.only == 'which':
         helpers.print_available_mod_files(mod_files)
@@ -458,22 +385,24 @@ def module_update(args):
             helpers.write_content_to_file(file_info, 'update-if-non-existent', args.diff)
 
 
-def module_genld(args):
+def module_generate_sources(args):
     output_dir = Path(args.output_dir).resolve() if args.output_dir else everest_dir / 'build/generated/modules'
 
-    loader_files = generate_module_loader_files(args.module, output_dir)
+    primary_update_strategy = 'force-update' if args.force else 'update'
+
+    loader_files = generate_module_source_files(args.module, output_dir)
 
     if not args.disable_clang_format:
         for file_info in loader_files:
             helpers.clang_format(args.clang_format_file, file_info)
 
     for file_info in loader_files:
-        helpers.write_content_to_file(file_info, 'force-update')
+        helpers.write_content_to_file(file_info, primary_update_strategy)
 
 
-def interface_genhdr(args):
+def interface_generate_sources(args):
     output_dir = Path(args.output_dir).resolve() if args.output_dir else everest_dir / \
-        'build/generated/interfaces/generated'
+        'build/generated/interfaces'
 
     primary_update_strategy = 'force-update' if args.force else 'update'
 
@@ -485,14 +414,14 @@ def interface_genhdr(args):
         interfaces = [if_path.stem for if_path in if_dir.iterdir() if (if_path.is_file() and if_path.suffix == '.json')]
 
     for interface in interfaces:
-        if_parts = generate_interface_headers(interface, all_interfaces, output_dir)
+        if_parts = generate_interface_source_files(interface, all_interfaces, output_dir)
 
         if not args.disable_clang_format:
-            helpers.clang_format(args.clang_format_file, if_parts['base'])
-            helpers.clang_format(args.clang_format_file, if_parts['exports'])
+            for part in if_parts.values():
+                helpers.clang_format(args.clang_format_file, part)
 
-        helpers.write_content_to_file(if_parts['base'], primary_update_strategy, args.diff)
-        helpers.write_content_to_file(if_parts['exports'], primary_update_strategy, args.diff)
+        for part in if_parts.values():
+            helpers.write_content_to_file(part, primary_update_strategy, args.diff)
 
 
 def helpers_genuuids(args):
@@ -546,16 +475,17 @@ def main():
     mod_update_parser.set_defaults(action_handler=module_update)
 
     mod_genld_parser = mod_actions.add_parser(
-        'generate-loader', aliases=['gl'], parents=[common_parser], help='generate everest loader')
+        'generate-sources', aliases=['gs'], parents=[common_parser], help='generate everest loader')
     mod_genld_parser.add_argument(
         'module', type=str, help='name of the module, for which the loader should be generated')
+    mod_genld_parser.add_argument('-f', '--force', action='store_true', help='force overwriting')
     mod_genld_parser.add_argument('-o', '--output-dir', type=str, help='Output directory for generated loader '
                                   'files (default: {everest-dir}/build/generated/module/)')
-    mod_genld_parser.set_defaults(action_handler=module_genld)
+    mod_genld_parser.set_defaults(action_handler=module_generate_sources)
 
     if_actions = parser_if.add_subparsers(metavar='<action>', help='available actions', required=True)
     if_genhdr_parser = if_actions.add_parser(
-        'generate-headers', aliases=['gh'], parents=[common_parser], help='generate headers')
+        'generate-sources', aliases=['gs'], parents=[common_parser], help='generate sources')
     if_genhdr_parser.add_argument('-f', '--force', action='store_true', help='force overwriting')
     if_genhdr_parser.add_argument('-o', '--output-dir', type=str, help='Output directory for generated interface '
                                   'headers (default: {everest-dir}/build/generated/include/generated)')
@@ -563,7 +493,7 @@ def main():
     if_genhdr_parser.add_argument('interfaces', nargs='*', help='a list of interfaces, for which header files should '
                                   'be generated - if no interface is given, all will be processed and non-processable '
                                   'will be skipped')
-    if_genhdr_parser.set_defaults(action_handler=interface_genhdr)
+    if_genhdr_parser.set_defaults(action_handler=interface_generate_sources)
 
     hlp_actions = parser_hlp.add_subparsers(metavar='<action>', help='available actions', required=True)
     hlp_genuuid_parser = hlp_actions.add_parser('generate-uuids', help='generete uuids')

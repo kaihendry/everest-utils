@@ -16,7 +16,7 @@ void
 
 {% macro var_to_any(var, name) -%}
 {% if var.is_variant -%}
-Everest::ModuleAdapter::variant_to_any({{ name }})
+everest::variant_to_any({{ name }})
 {%- else -%}
 boost::any({{ name }})
 {%- endif %}
@@ -24,14 +24,14 @@ boost::any({{ name }})
 
 {% macro var_to_cpp(arg) -%}
 {% if arg.is_variant -%}
-Everest::ModuleAdapter::any_to_variant<{{ arg.cpp_type|join(', ')}}>
+everest::any_to_variant<{{ arg.cpp_type|join(', ')}}>
 {%- else -%}
 boost::any_cast<{{ arg.cpp_type }}>
 {%- endif %}
 {%- endmacro %}
 
-{% macro call_cmd_signature(cmd) -%}
-{{ result_type(cmd.result) }} call_{{ cmd.name }}(
+{% macro call_cmd_signature(cmd, class_name=None) -%}
+{{ result_type(cmd.result) }} {% if class_name %}{{ class_name }}::{% endif %}{{ cmd.name }}(
 {%- for arg in cmd.args -%}
 {{ cpp_type(arg) }} {{ arg.name }}{{ ', ' if not loop.last }}
 {%- endfor -%}
@@ -48,10 +48,8 @@ handle_{{ cmd.name }}(
 )
 {%- endmacro %}
 
-{% macro publish_var_signature(var) %}
-void publish_{{ var.name }}({% if var.json_type != 'null' %}{{ cpp_type(var) }} value{% endif %}) {
-        _ev->publish(_name, "{{ var.name }}", {% if var.json_type != 'null' %}{{ var_to_any(var, 'value')}}{% else %}boost::blank(){% endif %});
-}
+{% macro publish_var_signature(var, class_name=None) %}
+void {% if class_name %}{{ class_name }}::{% endif %}{{ var.name }}({% if var.json_type != 'null' %}{{ cpp_type(var) }} value{% endif %})
 {% endmacro %}
 
 {% macro list_json_types(json_type) -%}

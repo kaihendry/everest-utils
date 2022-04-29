@@ -1,0 +1,11 @@
+list (APPEND MODULE_REQUIREMENTS
+    {% for req in requires %}
+    {{ req.type }}
+    {% endfor %}
+)
+
+list (APPEND MODULE_PROVIDES
+    {% for impl in provides %}
+    {{ impl.type }}
+    {% endfor %}
+)

@@ -2,121 +2,108 @@
 {{ print_spdx_line('Apache-2.0') }}
 {{ print_template_info('4') }}
 
-#include "{{ info.ld_ev_header }}"
+#include "module.hpp"
 
-#include "{{ info.module_header }}"
-{% for impl in provides %}
-#include "{{ impl.class_header }}"
-{% endfor %}
+#include <everest/utils/module_adapter.hpp>
 
-#include <framework/runtime.hpp>
-#include <utils/types.hpp>
+namespace intf = everest::interface;
 
+{% if configs %}
+static module::Configs setup_configs(const everest::ModuleConfigs& module_configs) {
+    module::Configs c;
+
+    {% for impl in configs.implementations %}
+    {% for item in impl.config %}
+    c.implementations.{{ impl.id }}.{{ item.name }} = boost::get<{{ item.cpp_type }}>(module_configs.at("{{ impl.id }}").at("{{ item.name }}"));
+    {% endfor %}
+
+    {% endfor %}
+    {% for item in configs.module %}
+    c.module.{{ item.name }} = boost::get<{{ item.cpp_type }}>(module_configs.at("!module").at("{{ item.name }}"));
+    {% endfor %}
+
+    return c;
+}
+
+{% endif %}
 namespace module {
 
-// FIXME (aw): could this way of keeping static variables be changed somehow?
-static Everest::ModuleAdapter adapter {};
-static Everest::PtrContainer<{{info.class_name }}> mod_ptr {};
+void load(int argc, char* argv[], ModuleBase& module) {
 
-// per module configs
-{# FIXME (aw): instead of being static, this could also be inside a map #}
-{% for impl in provides %}
-static {{ impl.id }}::Conf {{ impl.id }}_config;
-{% endfor %}
-static Conf module_conf;
-static ModuleInfo module_info;
-
-void LdEverest::init(ModuleConfigs module_configs, const ModuleInfo& mod_info) {
-    EVLOG(debug) << "init() called on module {{ info.name }}";
-
-    // populate config for provided implementations
-    {% for impl in provides %}
-    auto {{ impl.id }}_config_input = std::move(module_configs["{{ impl.id }}"]);
-    {% for item in impl.config %}
-    {{ impl.id }}_config.{{ item.name }} = boost::get<{{ item.cpp_type }}>({{ impl.id }}_config_input["{{ item.name }}"]);
-    {% endfor %}
-
-    {% endfor %}
-    {% if info.module_config|length %}
-
-    {% for item in info.module_config %}
-    module_conf.{{ item.name }} = boost::get<{{ item.cpp_type }}>(module_configs["!module"]["{{ item.name }}"]);
-    {% endfor %}
+    auto ma_ctx = everest::instanciate_module(argc, argv);
+    
+    {% if configs %}
+    auto configs = setup_configs(ma_ctx.module_configs);
     {% endif %}
 
-    module_info = mod_info;
-
-    mod_ptr->init();
-}
-
-void LdEverest::ready() {
-    EVLOG(debug) << "ready() called on module {{ info.name }}";
-    mod_ptr->ready();
-}
-
-void register_module_adapter(Everest::ModuleAdapter module_adapter) {
-    adapter = std::move(module_adapter);
-}
-
-std::vector<Everest::cmd> everest_register(const json& connections) {
-    EVLOG(debug) << "everest_register() called on module {{ info.name }}";
-
-    adapter.check_complete();
-
-    {% for impl in provides %}
-    auto p_{{ impl.id }} = std::make_unique<{{ impl.id }}::{{ impl.class_name }}>(&adapter, mod_ptr, {{ impl.id }}_config);
-    adapter.gather_cmds(*p_{{ impl.id }});
-
+    {% for req in requires %}
+    everest::RequirementHelper<intf::{{ req.type }}::BootProvides, intf::{{ req.type }}::RunProvides> r_{{ req.id }}(ma_ctx.ev);
     {% endfor %}
-    {% for requirement in requires %}
-    {# FIXME: needs refactoring #}
-    {% if requirement.is_vector %}
-    auto r_{{ requirement.id }} = std::vector<std::unique_ptr<{{ requirement.class_name }}>>();
-    if (connections.contains("{{ requirement.id }}")) {
-        auto requirement_connection = connections.at("{{ requirement.id }}");
-        for (size_t idx = 0; idx < requirement_connection.size(); idx++) {
-            auto requirement_module_id = requirement_connection[idx].at("module_id");
-            r_{{ requirement.id }}.emplace_back(std::make_unique<{{ requirement.class_name }}>(&adapter, Requirement{"{{ requirement.id }}", idx}, requirement_module_id));
-        }
+
+    const auto& cxns = ma_ctx.connections;
+    {% for req in requires %}
+    for (size_t idx = 0; idx < cxns.at("{{ req.id }}").size(); ++idx) {
+        r_{{ req.id }}.add({"{{ req.id }}", idx }, cxns.at("{{ req.id }}")[idx].at("module_id"));
     }
-    {% else %}
-    std::string r_{{ requirement.id }}_requirement_module_id;
-    if (connections.contains("{{ requirement.id }}")) {
-        auto requirement_connection = connections.at("{{ requirement.id }}");
-        if (requirement_connection.size() > 0) {
-            r_{{ requirement.id }}_requirement_module_id = requirement_connection[0].at("module_id");
-        }
-    }
-    auto r_{{ requirement.id }} = std::make_unique<{{ requirement.class_name }}>(&adapter, Requirement{"{{ requirement.id }}", 0}, r_{{ requirement.id }}_requirement_module_id);
+
+    {% endfor %}
+    module::BootRequirements boot_req{
+        {% for req in requires %}
+        {% if req.is_vector %}
+        r_{{ req.id }}.boot_provides,
+        {% else %}
+        r_{{ req.id }}.boot_provides[0],
+        {% endif %}
+        {% endfor %}
+    };
+
+    BootstrapContext boot_ctx {
+        {% if configs %}
+        configs,
+        {% endif %}
+        boot_req,
+        ma_ctx.info,
+    };
+
+    auto impls = module.mod_init(boot_ctx);
+    
+    module::Requirements req{
+        {% for req in requires %}
+        {% if req.is_vector %}
+        r_{{ req.id }}.run_provides,
+        {% else %}
+        r_{{ req.id }}.run_provides[0],
+        {% endif %}
+        {% endfor %}
+    };
+
+    {% if publishing_provides %}
+    module::Provides provides {
+        {% for impl in publishing_provides %}
+        intf::{{ impl.type }}::Provides(ma_ctx.ev, "{{ impl.id }}"),
+        {% endfor %}
+    };
     {% endif %}
+
+    {% for impl in provides %}
+    impls.{{ impl.id }}.do_register(ma_ctx.ev{% if impl.is_publishing %}, &provides.{{ impl.id }}.publish{% endif %});
     {% endfor %}
 
-    {% if info.enable_external_mqtt %}
-    static Everest::MqttProvider mqtt_provider(adapter);
-    {% endif %}
 
-    static {{ info.class_name }} module(
-    module_info,
-    {%- if info.enable_external_mqtt %}mqtt_provider, {% endif -%}
-    {%- for impl in provides -%}
-    std::move(p_{{ impl.id }}){{ ', ' }}
-    {%- endfor -%}
-    {%- for requirement in requires -%}
-    std::move(r_{{ requirement.id }}){{ ', ' }}
-    {%- endfor -%}
-    module_conf);
+    Context ctx {
+        {% if configs %}
+        configs,
+        {% endif %}
+        req,
+        {% if publishing_provides %}
+        provides,
+        {% endif %}
+        ma_ctx.info,
+    };
 
-    mod_ptr.set(&module);
-
-    return adapter.registered_commands;
+    everest::connect_module(ma_ctx.ev, [&ctx, &module](){
+        module.mod_ready(ctx);
+    });
 }
 
-} // namespace module
-
-int main(int argc, char* argv[]) {
-    auto module_loader = Everest::ModuleLoader(argc, argv, Everest::ModuleCallbacks(
-        module::register_module_adapter, module::everest_register,
-        module::LdEverest::init, module::LdEverest::ready));
-
-    return module_loader.initialize();
 }

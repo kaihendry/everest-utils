@@ -1,0 +1,44 @@
+{% from "helper_macros.j2" import print_spdx_line, cpp_type, var_to_cpp, var_to_any, call_cmd_signature, publish_var_signature %}
+{{ print_spdx_line('Apache-2.0') }}
+
+#include "{{ info.interface }}.hpp"
+
+#include <everest/everest.hpp>
+
+namespace everest::interface::{{ info.interface }} {
+
+{% if vars %}
+//
+// publish implementations
+//
+{% endif %}
+{% for var in vars %}
+{{ publish_var_signature(var, "Publishers") }} {
+    _ev->publish_var(_impl_id, "{{ var.name }}", {% if var.json_type != 'null' %}{{ var_to_any(var, 'value')}}{% else %}boost::blank(){% endif %});
+}
+
+{% endfor %}
+{% if cmds %}
+//
+// do_register implementations
+//
+void Handlers::do_register(Everest* ev{{ ', Publishers* publish' if vars }}) {
+    {% if vars %}
+    this->publish = publish;
+    {% endif %}
+    // tbd
+}
+
+void Callbacks::do_register(Everest* ev) {
+    // tbd
+}
+
+void Implementation::do_register(Everest* ev{{ ', Publishers* publish' if vars }}) {
+    if (handlers) {
+        handlers->do_register(ev{{ ', publish' if vars }});
+    } else {
+        callbacks->do_register(ev);
+    }
+}
+{% endif %}
+}

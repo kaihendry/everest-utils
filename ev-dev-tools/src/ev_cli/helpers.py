@@ -106,8 +106,8 @@ cpp_type_map = {
     "number": "double",
     "string": "std::string",
     "boolean": "bool",
-    "array": "Array",
-    "object": "Object",
+    "array": "types::Array",
+    "object": "types::Object",
 }
 
 

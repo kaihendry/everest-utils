@@ -1,0 +1,63 @@
+{% from "helper_macros.j2" import print_spdx_line, cpp_type, var_to_cpp, var_to_any, call_cmd_signature %}
+{{ print_spdx_line('Apache-2.0') }}
+
+#include "{{ info.interface }}.hpp"
+
+#include <everest/everest.hpp>
+#include <everest/logging/logging.hpp>
+#include <everest/utils/conversions.hpp>
+
+namespace everest::interface::{{ info.interface }} {
+
+{% if vars %}
+//
+// subscribe implementations
+//
+{% endif %}
+{% for var in vars %}
+void Subscribes::{{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ cpp_type(var) }}{% endif %})>& listener) {
+    ValueCallback cb = [listener](const Value& value) {
+        {% if var.json_type != 'null' %}
+        auto native_value = {{ var_to_cpp(var) }}(value);
+        listener(native_value);
+        {% else %}
+        if (value.type() != typeid({{ cpp_type(var) }})) {
+            EVLOG(error) << "Callback for variable '{{ var.name }}' in interface '{{ info.interface }}' has wrong type!";
+        }
+        listener();
+        {% endif %}
+    };
+    _ev->subscribe_var(_req, "{{ var.name }}", cb);
+}
+
+{% endfor %}
+{% if cmds %}
+//
+// call implementations
+//
+{% endif %}
+{% for cmd in cmds %}
+{{ call_cmd_signature(cmd, "Calls") }} {
+    Parameters args;
+    {% for arg in cmd.args %}
+    args["{{ arg.name }}"] = {{ var_to_any(arg, arg.name) }};
+    {% endfor %}
+    {% if cmd.result %}Result result = {% endif %}_ev->call_cmd(_req, "{{ cmd.name }}", args);
+    {% if cmd.result %}
+    auto retval = {{ var_to_cpp(cmd.result) }}(result.get());
+
+    return retval;
+    {% endif %}
+}
+
+{% endfor %}
+//
+// Provides constructors
+//
+BootProvides::BootProvides(Everest* ev, const Requirement& req, const std::string& module_id) :
+    {{ 'subscribe(ev, req), ' if vars }}module_id(module_id){};
+
+RunProvides::RunProvides(Everest* ev, const Requirement& req, const std::string& module_id) :
+    {{ 'call(ev, req), ' if cmds }}{{ 'subscribe(ev, req), ' if vars }}module_id(module_id){};
+
+}
