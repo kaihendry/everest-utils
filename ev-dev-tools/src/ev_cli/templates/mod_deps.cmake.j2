@@ -4,7 +4,7 @@ list (APPEND MODULE_REQUIREMENTS
     {% endfor %}
 )
 
-list (APPEND MODULE_PROVIDES
+list (APPEND MODULE_IMPLEMENTATIONS
     {% for impl in provides %}
     {{ impl.type }}
     {% endfor %}

@@ -1,20 +1,2 @@
-{% from "helper_macros.j2" import insert_block, print_template_info %}
-{{ print_template_info('2', 'marked regions will be kept', '#') }}
-
-add_executable({{ info.name }} 
-    ${CMAKE_BINARY_DIR}/generated/modules/{{ info.name }}/ld-ev.cpp # module loader / main()
-    {% for req in requires %}
-    ${CMAKE_BINARY_DIR}/generated/interfaces/{{ req.type }}.cpp
-    {% endfor %}
-    {% for impl in provides %}
-    ${CMAKE_BINARY_DIR}/generated/interfaces/impl/{{ impl.type }}.cpp
-    {% endfor %}
-    module.cpp
-)
-target_include_directories({{ info.name }} PRIVATE ${CMAKE_BINARY_DIR})
-target_compile_features({{ info.name }} PRIVATE cxx_std_14)
-target_link_libraries({{ info.name }}
-    everest ${CMAKE_DL_LIBS}
-    everest::log
-    fmt::fmt
-)
+cpp_module_setup()
+target_sources(${MODULE_TARGET} PRIVATE module.cpp)

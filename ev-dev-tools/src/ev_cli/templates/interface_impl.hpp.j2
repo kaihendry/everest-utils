@@ -7,7 +7,6 @@
 
 namespace everest::interface::{{ info.interface }} {
 
-{% if vars %}
 struct Publishers {
     Publishers(Everest* ev, const std::string& impl_id) : _ev(ev), _impl_id(impl_id) {};
     {% for var in vars %}
@@ -19,30 +18,24 @@ private:
     std::string _impl_id;
 };
 
-struct Provides {
-    Provides(Everest* ev, const std::string& impl_id) : publish(ev, impl_id) {};
-    Publishers publish;
-};
-{% endif %}
-
 {% if cmds %}
 class Handlers {
 protected:
     {% for cmd in cmds %}
     virtual {{ call_cmd_signature(cmd) }} = 0;
     {% endfor %}
+    {% if vars %}
+    Publishers* vars {};
+    {% endif %}
 
 private:
-    {% if vars %}
-    Publishers* publish {};
-    {% endif %}
-    void do_register(Everest* ev{{ ', Publishers* publish' if vars }});
+    void do_register(Everest* ev{{ ', Publishers* vars' if vars }});
     friend class Implementation;
 };
 
 struct Callbacks {
     {% for cmd in cmds %}
-    std::function<{{ result_type(cmd.result) }}({% for arg in cmd.args %}{{ cpp_type(arg) }}{{ ', ' if not loop.last }}{% endfor %})> {{ cmd.name }};
+    std::function<{{ result_type(cmd.result) }}({% for arg in cmd.args %}{{ cpp_type(arg) }}{{ ', ' if not loop.last }}{% endfor %})> handle_{{ cmd.name }};
     {% endfor %}
 
 private:
@@ -56,7 +49,7 @@ public:
     Implementation(Callbacks& callbacks) : callbacks(&callbacks){};
 
     // FIXME: (aw): this function is visible on the ImplementationList items
-    void do_register(Everest* ev{{ ', Publishers* publish' if vars }});
+    void do_register(Everest* ev, Publishers* vars);
 private:
     Handlers* handlers{nullptr};
     Callbacks* callbacks{nullptr};
@@ -66,7 +59,7 @@ private:
 class Implementation {
 public:
     Implementation(std::nullptr_t null) {};
-    void do_register(Everest* ev) {};
+    void do_register(Everest* ev, Publishers* vars) {};
 };
 
 {% endif %}

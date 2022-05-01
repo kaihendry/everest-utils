@@ -20,6 +20,9 @@ import argparse
 
 # Global variables
 everest_dir = None
+GENERATED_PREFIX = "build/generated"
+GENERATED_INCLUDE_PREFIX = "include/generated"
+GENERATED_SOURCE_PREFIX = "src"
 
 # jinja template environment and global variable
 env = j2.Environment(loader=j2.FileSystemLoader(Path(__file__).parent / 'templates'),
@@ -27,8 +30,8 @@ env = j2.Environment(loader=j2.FileSystemLoader(Path(__file__).parent / 'templat
                      keep_trailing_newline=True)
 
 templates = {
-    'interface.hpp': env.get_template('interface.hpp.j2'),
-    'interface.cpp': env.get_template('interface.cpp.j2'),
+    'interface_req.hpp': env.get_template('interface_req.hpp.j2'),
+    'interface_req.cpp': env.get_template('interface_req.cpp.j2'),
     'interface_impl.hpp': env.get_template('interface_impl.hpp.j2'),
     'interface_impl.cpp': env.get_template('interface_impl.cpp.j2'),
     'module.cpp': env.get_template('module.cpp.j2'),
@@ -157,22 +160,21 @@ def set_impl_specific_path_vars(tmpl_data, output_path):
         (impl['class_header'], impl['cpp_file_rel_path']) = construct_impl_file_paths(impl)
 
 
-def generate_module_source_files(mod, output_dir):
+def generate_module_source_files(module_name, output_dir):
     loader_files = []
 
-    mod_path = everest_dir / f'modules/{mod}/manifest.json'
+    mod_path = everest_dir / f'modules/{module_name}/manifest.json'
     mod_def = helpers.load_validated_module_def(mod_path, validators['module'])
-    tmpl_data = generate_tmpl_data_for_module(mod, mod_def)
+    tmpl_data = generate_tmpl_data_for_module(module_name, mod_def)
 
     set_impl_specific_path_vars(tmpl_data, mod_path.parent)
 
     # module.hpp
-    tmpl_data['info']['hpp_guard'] = 'MODULE_HPP'
-
+    tmpl_data['info']['hpp_guard'] = f'GENERATED_MODULE_{helpers.snake_case(module_name).upper()}_HPP'
     loader_files.append({
         'filename': 'module.hpp',
-        'path': output_dir / mod / 'module.hpp',
-        'printable_name': f'{mod}/module.hpp',
+        'path': output_dir / GENERATED_INCLUDE_PREFIX / 'module' / f'{module_name}.hpp',
+        'printable_name': f'{module_name}.hpp',
         'content': templates['module.hpp'].render(tmpl_data),
         'last_mtime': mod_path.stat().st_mtime
     })
@@ -180,8 +182,8 @@ def generate_module_source_files(mod, output_dir):
     # ld-ev.cpp
     loader_files.append({
         'filename': 'ld-ev.cpp',
-        'path': output_dir / mod / 'ld-ev.cpp',
-        'printable_name': f'{mod}/ld-ev.cpp',
+        'path': output_dir / GENERATED_SOURCE_PREFIX / 'module' / module_name / 'ld-ev.cpp',
+        'printable_name': f'{module_name}/ld-ev.cpp',
         'content': templates['ld-ev.cpp'].render(tmpl_data),
         'last_mtime': mod_path.stat().st_mtime
     })
@@ -192,8 +194,8 @@ def generate_module_source_files(mod, output_dir):
     # mod_deps.cmake
     loader_files.append({
         'filename': 'mod_deps.cmake',
-        'path': output_dir / mod / 'mod_deps.cmake',
-        'printable_name': f'{mod}/mod_deps.cmake',
+        'path': output_dir / GENERATED_SOURCE_PREFIX / 'module' / module_name / 'mod_deps.cmake',
+        'printable_name': f'{module_name}/mod_deps.cmake',
         'content': templates['mod_deps.cmake'].render(tmpl_data),
         'last_mtime': max(mod_path.stat().st_mtime, template_mtime)
     })
@@ -220,24 +222,7 @@ def create_module_files(mod, update_flag):
     # FIXME (aw): we might move the following function into generate_tmp_data_for_module
     set_impl_specific_path_vars(tmpl_data, output_path)
 
-    cmakelists_blocks = {
-        'version': 'v1',
-        'format_str': '# ev@{uuid}:{version}',
-        'regex_str': '^(?P<indent>\s*)# ev@(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):(?P<version>.*)$',
-        'definitions': {
-            'add_general': {
-                'id': 'bcc62523-e22b-41d7-ba2f-825b493a3c97',
-                'content': '# insert your custom targets and additional config variables here'
-            },
-            'add_other': {
-                'id': 'c55432ab-152c-45a9-9d2e-7281d50c69c3',
-                'content': '# insert other things like install cmds etc here'
-            }
-        }
-    }
-
     cmakelists_file = output_path / 'CMakeLists.txt'
-    tmpl_data['info']['blocks'] = helpers.load_tmpl_blocks(cmakelists_blocks, cmakelists_file, update_flag)
     mod_files['core'].append({
         'abbr': 'cmakelists',
         'path': cmakelists_file,
@@ -246,7 +231,6 @@ def create_module_files(mod, update_flag):
     })
 
     module_cpp_file = output_path / 'module.cpp'
-    tmpl_data['info']['blocks'] = None
     mod_files['core'].append({
         'abbr': 'module.cpp',
         'path': module_cpp_file,
@@ -276,7 +260,7 @@ def load_interface_defintion(interface):
 
 
 def generate_interface_source_files(interface, all_interfaces_flag, output_dir):
-    if_parts = {'hpp': None, 'cpp': None, 'impl_hpp': None, 'impl_cpp': None}
+    if_parts = {'req_hpp': None, 'req_cpp': None, 'impl_hpp': None, 'impl_cpp': None}
 
     try:
         if_def, last_mtime = load_interface_defintion(interface)
@@ -290,41 +274,41 @@ def generate_interface_source_files(interface, all_interfaces_flag, output_dir):
     tmpl_data = generate_tmpl_data_for_if(interface, if_def)
 
     # requirement / export definitions
-    tmpl_data['info']['hpp_guard'] = f'GENERATED_INTERFACES_{helpers.snake_case(interface).upper()}_HPP'
+    tmpl_data['info']['hpp_guard'] = f'GENERATED_INTERFACE_{helpers.snake_case(interface).upper()}_REQ_HPP'
 
-    hpp_file = output_dir / f'{interface}.hpp'
-    if_parts['hpp'] = {
+    hpp_file = output_dir / GENERATED_INCLUDE_PREFIX / 'interface' / f'{interface}_req.hpp'
+    if_parts['req_hpp'] = {
         'path': hpp_file,
-        'content': templates['interface.hpp'].render(tmpl_data),
+        'content': templates['interface_req.hpp'].render(tmpl_data),
         'last_mtime': last_mtime,
-        'printable_name': hpp_file.relative_to(output_dir.parent)
+        'printable_name': hpp_file.relative_to(output_dir)
     }
 
-    cpp_file = output_dir / f'{interface}.cpp'
-    if_parts['cpp'] = {
+    cpp_file = output_dir / GENERATED_SOURCE_PREFIX / 'interface' / f'{interface}_req.cpp'
+    if_parts['req_cpp'] = {
         'path': cpp_file,
-        'content': templates['interface.cpp'].render(tmpl_data),
+        'content': templates['interface_req.cpp'].render(tmpl_data),
         'last_mtime': last_mtime,
-        'printable_name': cpp_file.relative_to(output_dir.parent)
+        'printable_name': cpp_file.relative_to(output_dir)
     }
 
     # implementation definitions
-    tmpl_data['info']['hpp_guard'] = f'GENERATED_INTERFACES_IMPL_{helpers.snake_case(interface).upper()}_HPP'
+    tmpl_data['info']['hpp_guard'] = f'GENERATED_INTERFACE_{helpers.snake_case(interface).upper()}_IMPL_HPP'
 
-    impl_hpp_file = output_dir / 'impl' / f'{interface}.hpp'
+    impl_hpp_file = output_dir / GENERATED_INCLUDE_PREFIX / 'interface' / f'{interface}_impl.hpp'
     if_parts['impl_hpp'] = {
         'path': impl_hpp_file,
         'content': templates['interface_impl.hpp'].render(tmpl_data),
         'last_mtime': last_mtime,
-        'printable_name': impl_hpp_file.relative_to(output_dir.parent)
+        'printable_name': impl_hpp_file.relative_to(output_dir)
     }
 
-    impl_cpp_file = output_dir / 'impl' / f'{interface}.cpp'
+    impl_cpp_file = output_dir / GENERATED_SOURCE_PREFIX / 'interface' / f'{interface}_impl.cpp'
     if_parts['impl_cpp'] = {
         'path': impl_cpp_file,
         'content': templates['interface_impl.cpp'].render(tmpl_data),
         'last_mtime': last_mtime,
-        'printable_name': impl_cpp_file.relative_to(output_dir.parent)
+        'printable_name': impl_cpp_file.relative_to(output_dir)
     }
 
     return if_parts
@@ -386,7 +370,7 @@ def module_update(args):
 
 
 def module_generate_sources(args):
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else everest_dir / 'build/generated/modules'
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else everest_dir / GENERATED_PREFIX
 
     primary_update_strategy = 'force-update' if args.force else 'update'
 
@@ -401,8 +385,7 @@ def module_generate_sources(args):
 
 
 def interface_generate_sources(args):
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else everest_dir / \
-        'build/generated/interfaces'
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else everest_dir / GENERATED_PREFIX
 
     primary_update_strategy = 'force-update' if args.force else 'update'
 
@@ -474,21 +457,22 @@ def main():
                                    'For a list of available files use "--only which".')
     mod_update_parser.set_defaults(action_handler=module_update)
 
+    # FIXME (aw): rename genld and genhdr
     mod_genld_parser = mod_actions.add_parser(
         'generate-sources', aliases=['gs'], parents=[common_parser], help='generate everest loader')
     mod_genld_parser.add_argument(
         'module', type=str, help='name of the module, for which the loader should be generated')
     mod_genld_parser.add_argument('-f', '--force', action='store_true', help='force overwriting')
-    mod_genld_parser.add_argument('-o', '--output-dir', type=str, help='Output directory for generated loader '
-                                  'files (default: {everest-dir}/build/generated/module/)')
+    mod_genld_parser.add_argument('-o', '--output-dir', type=str,
+                                  help=f'Output directory for generated files (default: {{everest-dir}}/{GENERATED_PREFIX})')
     mod_genld_parser.set_defaults(action_handler=module_generate_sources)
 
     if_actions = parser_if.add_subparsers(metavar='<action>', help='available actions', required=True)
     if_genhdr_parser = if_actions.add_parser(
         'generate-sources', aliases=['gs'], parents=[common_parser], help='generate sources')
     if_genhdr_parser.add_argument('-f', '--force', action='store_true', help='force overwriting')
-    if_genhdr_parser.add_argument('-o', '--output-dir', type=str, help='Output directory for generated interface '
-                                  'headers (default: {everest-dir}/build/generated/include/generated)')
+    if_genhdr_parser.add_argument('-o', '--output-dir', type=str, help='Output directory for generated files '
+                                  f'headers (default: {{everest-dir}}/{GENERATED_PREFIX})')
     if_genhdr_parser.add_argument('-d', '--diff', '--dry-run', action='store_true', help='show resulting diff')
     if_genhdr_parser.add_argument('interfaces', nargs='*', help='a list of interfaces, for which header files should '
                                   'be generated - if no interface is given, all will be processed and non-processable '

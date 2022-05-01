@@ -2,7 +2,7 @@
 {{ print_spdx_line('Apache-2.0') }}
 {{ print_template_info('4') }}
 
-#include "module.hpp"
+#include <generated/module/{{ info.name }}.hpp>
 
 #include <everest/utils/module_adapter.hpp>
 
@@ -36,70 +36,43 @@ void load(int argc, char* argv[], ModuleBase& module) {
     auto configs = setup_configs(ma_ctx.module_configs);
     {% endif %}
 
-    {% for req in requires %}
-    everest::RequirementHelper<intf::{{ req.type }}::BootProvides, intf::{{ req.type }}::RunProvides> r_{{ req.id }}(ma_ctx.ev);
-    {% endfor %}
-
     const auto& cxns = ma_ctx.connections;
     {% for req in requires %}
+    everest::RequirementHelper<intf::{{ req.type }}::BootRequirement, intf::{{ req.type }}::RunRequirement> r_{{ req.id }}(ma_ctx.ev);
     for (size_t idx = 0; idx < cxns.at("{{ req.id }}").size(); ++idx) {
         r_{{ req.id }}.add({"{{ req.id }}", idx }, cxns.at("{{ req.id }}")[idx].at("module_id"));
     }
 
     {% endfor %}
-    module::BootRequirements boot_req{
-        {% for req in requires %}
-        {% if req.is_vector %}
-        r_{{ req.id }}.boot_provides,
-        {% else %}
-        r_{{ req.id }}.boot_provides[0],
-        {% endif %}
-        {% endfor %}
-    };
 
-    BootstrapContext boot_ctx {
+    BootContext boot_ctx {
         {% if configs %}
         configs,
         {% endif %}
-        boot_req,
+        {% for req in requires %}
+        r_{{ req.id }}.boot_requirements{{ '[0]' if not req.is_vector }},
+        {% endfor %}
         ma_ctx.info,
     };
 
     auto impls = module.mod_init(boot_ctx);
-    
-    module::Requirements req{
-        {% for req in requires %}
-        {% if req.is_vector %}
-        r_{{ req.id }}.run_provides,
-        {% else %}
-        r_{{ req.id }}.run_provides[0],
-        {% endif %}
-        {% endfor %}
-    };
 
-    {% if publishing_provides %}
-    module::Provides provides {
-        {% for impl in publishing_provides %}
-        intf::{{ impl.type }}::Provides(ma_ctx.ev, "{{ impl.id }}"),
-        {% endfor %}
-    };
-    {% endif %}
-
-    {% for impl in provides %}
-    impls.{{ impl.id }}.do_register(ma_ctx.ev{% if impl.is_publishing %}, &provides.{{ impl.id }}.publish{% endif %});
-    {% endfor %}
-
-
-    Context ctx {
+    RunContext ctx {
         {% if configs %}
         configs,
         {% endif %}
-        req,
-        {% if publishing_provides %}
-        provides,
-        {% endif %}
+        {% for req in requires %}
+        r_{{ req.id }}.run_requirements{{ '[0]' if not req.is_vector }},
+        {% endfor %}
+        {% for impl in provides %}
+        intf::{{ impl.type }}::Publishers(ma_ctx.ev, "{{ impl.id }}"),
+        {% endfor %}
         ma_ctx.info,
     };
+
+    {% for impl in provides %}
+    impls.{{ impl.id }}.do_register(ma_ctx.ev, &ctx.impl_{{ impl.id }});
+    {% endfor %}
 
     everest::connect_module(ma_ctx.ev, [&ctx, &module](){
         module.mod_ready(ctx);

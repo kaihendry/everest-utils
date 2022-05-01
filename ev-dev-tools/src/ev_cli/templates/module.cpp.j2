@@ -1,7 +1,7 @@
 {% from "helper_macros.j2" import print_spdx_line, cpp_type, var_to_cpp, var_to_any, call_cmd_signature %}
 {{ print_spdx_line('Apache-2.0') }}
 
-#include <generated/modules/{{ info.name }}/module.hpp>
+#include <generated/module/{{ info.name }}.hpp>
 
 namespace types = everest::types;
 
@@ -15,7 +15,7 @@ namespace module {
 {% endif %}
 class {{ impl.type }}Impl : public everest::interface::{{ impl.type }}::Handlers {
 public:
-    {{ impl.type }}Impl(Requirements*& uses) : uses(uses) {};
+    {{ impl.type }}Impl(RunContext*& ctx) : ctx(ctx) {};
     {% for cmd in impl.tmpl.cmds %}
     {{ call_cmd_signature(cmd) }} override {
         // your code for cmd {{ cmd.name }} goes here
@@ -25,7 +25,7 @@ public:
     }
     {% endfor %}
 private:
-    Requirements* const& uses;
+    RunContext* const& ctx;
 };
 
 {% endfor %}
@@ -35,7 +35,7 @@ private:
 //
 class Module : public ModuleBase {
 private:
-    ImplementationList mod_init(BootstrapContext& ctx) override {
+    ImplementationList mod_init(BootContext& ctx) override {
         return {
             {% for impl in provides %}
             {% if impl.is_callable %}
@@ -47,13 +47,13 @@ private:
         };
     };
 
-    void mod_ready(Context& ctx) override{
-        uses = &ctx.uses;
+    void mod_ready(RunContext& ctx) override{
+        this->ctx = &ctx;
     };
 
-    Requirements* uses;
+    RunContext* ctx;
     {% for impl in callable_provides %}
-    {{ impl.type }}Impl {{ impl.id }}{ uses };
+    {{ impl.type }}Impl {{ impl.id }}{ ctx };
     {% endfor %}
 };
 

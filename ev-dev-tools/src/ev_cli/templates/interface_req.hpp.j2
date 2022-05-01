@@ -7,20 +7,17 @@
 
 namespace everest::interface::{{ info.interface }} {
 
-{% if vars %}
-struct Subscribes {
+struct Subscribes{
     Subscribes(Everest* ev, const Requirement& req) : _ev(ev), _req(req){};
     {% for var in vars %}
-    void {{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ cpp_type(var) }}{% endif %})>& listener);
+    void subscribe_{{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ cpp_type(var) }}{% endif %})>& listener);
     {% endfor %}
 
 private:
     Everest* _ev;
     Requirement _req;
 };
-{% endif %}
 
-{% if cmds %}
 struct Calls {
     Calls(Everest* ev, const Requirement& req) : _ev(ev), _req(req){};
     {% for cmd in cmds %}
@@ -31,18 +28,14 @@ private:
     Everest* _ev;
     Requirement _req;
 };
-{% endif %}
 
-struct BootProvides {
-    BootProvides(Everest* ev, const Requirement& req, const std::string& module_id);
-    {% if vars %}Subscribes subscribe;{% endif %}
+struct BootRequirement : public Subscribes {
+    BootRequirement(Everest* ev, const Requirement& req, const std::string& module_id);
     std::string module_id;
 };
 
-struct RunProvides {
-    RunProvides(Everest* ev, const Requirement& req, const std::string& module_id);
-    {% if vars %}Subscribes subscribe;{% endif %}
-    {% if cmds %}Calls call;{% endif %}
+struct RunRequirement : public Subscribes, public Calls {
+    RunRequirement(Everest* ev, const Requirement& req, const std::string& module_id);
     std::string module_id;
 };
 }

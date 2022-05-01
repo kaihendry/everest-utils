@@ -6,14 +6,14 @@
 {% if requires %}
 // interface headers for requirements
 {% for req in requires %}
-#include <generated/interfaces/{{ req.type }}.hpp>
+#include <generated/interface/{{ req.type }}_req.hpp>
 {% endfor %}
 
 {% endif %}
 {% if provides %}
 // interface headers for provided implementations
 {% for impl in provides %}
-#include <generated/interfaces/impl/{{ impl.type }}.hpp>
+#include <generated/interface/{{ impl.type }}_impl.hpp>
 {% endfor %}
 
 {% endif %}
@@ -57,71 +57,50 @@ struct Configs {
 };
 {% endif %}
 
-{% if requires %}
-
-// requirements
-
-struct BootRequirements {
-    {% for req in requires %}
-    {% if req.is_vector %}
-    std::vector<everest::interface::{{ req.type }}::BootProvides> {{ req.id }};
-    {% else %}
-    everest::interface::{{ req.type }}::BootProvides {{ req.id }};
-    {% endif %}
-    {% endfor %}
-};
-
-struct Requirements {
-    {% for req in requires %}
-    {% if req.is_vector %}
-    std::vector<everest::interface::{{ req.type }}::RunProvides> {{ req.id }};
-    {% else %}
-    everest::interface::{{ req.type }}::RunProvides {{ req.id }};
-    {% endif %}
-    {% endfor %}
-};
-
-{% endif %}
-{% if publishing_provides %}
-struct Provides {
-    {% for impl in publishing_provides %}
-    everest::interface::{{ impl.type }}::Provides {{ impl.id }};
-    {% endfor %}
-};
-
-{% endif %}
 struct ImplementationList {
     {% for impl in provides %}
     everest::interface::{{ impl.type }}::Implementation {{ impl.id }};
     {% endfor %}
 };
 
-struct Context {
+struct RunContext {
     {% if configs %}
     Configs config;
     {% endif %}
-    Requirements uses;
-    {% if publishing_provides %}
-    Provides provides;
+    {% for req in requires %}
+    {% if req.is_vector %}
+    std::vector<everest::interface::{{ req.type }}::RunRequiremnt> req_{{ req.id }};
+    {% else %}
+    everest::interface::{{ req.type }}::RunRequirement req_{{ req.id }};
     {% endif %}
+    {% endfor %}
+    {% for impl in provides %}
+    everest::interface::{{ impl.type }}::Publishers impl_{{ impl.id }};
+    {% endfor %}
     everest::ModuleInfo info;
 };
 
-struct BootstrapContext {
+struct BootContext {
     {% if configs %}
     Configs config;
     {% endif %}
-    BootRequirements uses;
+    {% for req in requires %}
+    {% if req.is_vector %}
+    std::vector<everest::interface::{{ req.type }}::BootRequirement> req_{{ req.id }};
+    {% else %}
+    everest::interface::{{ req.type }}::BootRequirement req_{{ req.id }};
+    {% endif %}
+    {% endfor %}
     everest::ModuleInfo info;
 };
 
-using ModuleInit = std::function<ImplementationList&(BootstrapContext&)>;
-using ModuleReady = std::function<void(Context&)>;
+using ModuleInit = std::function<ImplementationList&(BootContext&)>;
+using ModuleReady = std::function<void(RunContext&)>;
 
 class ModuleBase {
 public:
-    virtual ImplementationList mod_init(BootstrapContext&) = 0;
-    virtual void mod_ready(Context&) = 0;
+    virtual ImplementationList mod_init(BootContext&) = 0;
+    virtual void mod_ready(RunContext&) = 0;
 };
 
 void load(int argc, char* argv[], ModuleBase&);

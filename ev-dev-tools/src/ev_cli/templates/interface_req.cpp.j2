@@ -1,7 +1,7 @@
 {% from "helper_macros.j2" import print_spdx_line, cpp_type, var_to_cpp, var_to_any, call_cmd_signature %}
 {{ print_spdx_line('Apache-2.0') }}
 
-#include "{{ info.interface }}.hpp"
+#include <generated/interface/{{ info.interface }}_req.hpp>
 
 #include <everest/everest.hpp>
 #include <everest/logging/logging.hpp>
@@ -9,13 +9,13 @@
 
 namespace everest::interface::{{ info.interface }} {
 
-{% if vars %}
+{% for var in vars %}
+{% if loop.first %}
 //
 // subscribe implementations
 //
 {% endif %}
-{% for var in vars %}
-void Subscribes::{{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ cpp_type(var) }}{% endif %})>& listener) {
+void Subscribes::subscribe_{{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ cpp_type(var) }}{% endif %})>& listener) {
     ValueCallback cb = [listener](const Value& value) {
         {% if var.json_type != 'null' %}
         auto native_value = {{ var_to_cpp(var) }}(value);
@@ -31,12 +31,12 @@ void Subscribes::{{ var.name }}(const std::function<void({% if var.json_type != 
 }
 
 {% endfor %}
-{% if cmds %}
+{% for cmd in cmds %}
+{% if loop.first %}
 //
 // call implementations
 //
 {% endif %}
-{% for cmd in cmds %}
 {{ call_cmd_signature(cmd, "Calls") }} {
     Parameters args;
     {% for arg in cmd.args %}
@@ -52,12 +52,11 @@ void Subscribes::{{ var.name }}(const std::function<void({% if var.json_type != 
 
 {% endfor %}
 //
-// Provides constructors
+// requirement constructors
 //
-BootProvides::BootProvides(Everest* ev, const Requirement& req, const std::string& module_id) :
-    {{ 'subscribe(ev, req), ' if vars }}module_id(module_id){};
+BootRequirement::BootRequirement(Everest* ev, const Requirement& req, const std::string& module_id) :
+    Subscribes(ev, req), module_id(module_id){};
 
-RunProvides::RunProvides(Everest* ev, const Requirement& req, const std::string& module_id) :
-    {{ 'call(ev, req), ' if cmds }}{{ 'subscribe(ev, req), ' if vars }}module_id(module_id){};
-
+RunRequirement::RunRequirement(Everest* ev, const Requirement& req, const std::string& module_id) :
+    Calls(ev, req), Subscribes(ev, req), module_id(module_id){};
 }
