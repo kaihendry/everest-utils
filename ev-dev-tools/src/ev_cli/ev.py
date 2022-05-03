@@ -36,6 +36,7 @@ templates = {
     'interface_impl.cpp': env.get_template('interface_impl.cpp.j2'),
     'module.cpp': env.get_template('module.cpp.j2'),
     'module.hpp': env.get_template('module.hpp.j2'),
+    'json_file.cpp': env.get_template('json_file.cpp.j2'),
     'ld-ev.cpp': env.get_template('ld-ev.cpp.j2'),
     'cmakelists': env.get_template('CMakeLists.txt.j2'),
     'mod_deps.cmake': env.get_template('mod_deps.cmake.j2')
@@ -167,6 +168,12 @@ def generate_module_source_files(module_name, output_dir):
     mod_def = helpers.load_validated_module_def(mod_path, validators['module'])
     tmpl_data = generate_tmpl_data_for_module(module_name, mod_def)
 
+    tmpl_data['manifest_json'] = {
+        **helpers.generate_cpp_inline_representation(mod_path),
+        'name': 'manifest_json',
+        'namespace': 'module'
+    }
+
     set_impl_specific_path_vars(tmpl_data, mod_path.parent)
 
     # module.hpp
@@ -200,14 +207,14 @@ def generate_module_source_files(module_name, output_dir):
         'last_mtime': max(mod_path.stat().st_mtime, template_mtime)
     })
 
-    # # manifest.h
-    # loader_files.append({
-    #     'filename': 'manifest.h',
-    #     'path': output_dir / mod / 'manifest.h',
-    #     'printable_name': f'{mod}/manifest.h',
-    #     'content': templates['ld-ev.cpp'].render(tmpl_data),
-    #     'last_mtime': mod_path.stat().st_mtime
-    # })
+    # manifest.cpp
+    loader_files.append({
+        'filename': 'manifest.h',
+        'path': output_dir / GENERATED_SOURCE_PREFIX / 'module' / module_name / 'manifest.cpp',
+        'printable_name': f'{module_name}/manifest.cpp',
+        'content': templates['json_file.cpp'].render(tmpl_data['manifest_json']),
+        'last_mtime': mod_path.stat().st_mtime
+    })
 
     return loader_files
 
@@ -260,7 +267,9 @@ def load_interface_defintion(interface):
 
 
 def generate_interface_source_files(interface, all_interfaces_flag, output_dir):
-    if_parts = {'req_hpp': None, 'req_cpp': None, 'impl_hpp': None, 'impl_cpp': None}
+    if_path = everest_dir / f'interfaces/{interface}.json'
+
+    if_parts = {'req_hpp': None, 'req_cpp': None, 'impl_hpp': None, 'impl_cpp': None, 'json': None}
 
     try:
         if_def, last_mtime = load_interface_defintion(interface)
@@ -272,6 +281,11 @@ def generate_interface_source_files(interface, all_interfaces_flag, output_dir):
             return
 
     tmpl_data = generate_tmpl_data_for_if(interface, if_def)
+    tmpl_data['interface_json'] = {
+        **helpers.generate_cpp_inline_representation(if_path),
+        'name': 'interface_json',
+        'namespace': f'everest::interface::{interface}'
+    }
 
     # requirement / export definitions
     tmpl_data['info']['hpp_guard'] = f'GENERATED_INTERFACE_{helpers.snake_case(interface).upper()}_REQ_HPP'
@@ -309,6 +323,14 @@ def generate_interface_source_files(interface, all_interfaces_flag, output_dir):
         'content': templates['interface_impl.cpp'].render(tmpl_data),
         'last_mtime': last_mtime,
         'printable_name': impl_cpp_file.relative_to(output_dir)
+    }
+
+    interface_json_file = output_dir / GENERATED_SOURCE_PREFIX / 'interface' / f'{interface}_json.cpp'
+    if_parts['json'] = {
+        'path': interface_json_file,
+        'content': templates['json_file.cpp'].render(tmpl_data['interface_json']),
+        'last_mtime': last_mtime,
+        'printable_name': interface_json_file.relative_to(output_dir)
     }
 
     return if_parts
@@ -418,6 +440,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='Everest command line tool')
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
+    parser.set_defaults(needs_everest=True)
 
     common_parser = argparse.ArgumentParser(add_help=False)
     # parser.add_argument("--framework-dir", "-fd", help='directory of everest framework')
@@ -482,27 +505,28 @@ def main():
     hlp_actions = parser_hlp.add_subparsers(metavar='<action>', help='available actions', required=True)
     hlp_genuuid_parser = hlp_actions.add_parser('generate-uuids', help='generete uuids')
     hlp_genuuid_parser.add_argument('count', type=int, default=3)
-    hlp_genuuid_parser.set_defaults(action_handler=helpers_genuuids)
+    hlp_genuuid_parser.set_defaults(action_handler=helpers_genuuids, needs_everest=False)
 
     args = parser.parse_args()
 
-    everest_dir = Path(args.everest_dir).resolve()
-    if not (everest_dir / 'interfaces').exists():
-        print('The default (".") xor supplied (via --everest-dir) everest directory\n'
-              'doesn\'t contain an "interface" directory and therefore does not seem to be valid.\n'
-              f'dir: {everest_dir}')
-        exit(1)
+    if args.needs_everest:
+        everest_dir = Path(args.everest_dir).resolve()
+        if not (everest_dir / 'interfaces').exists():
+            print('The default (".") xor supplied (via --everest-dir) everest directory\n'
+                  'doesn\'t contain an "interface" directory and therefore does not seem to be valid.\n'
+                  f'dir: {everest_dir}')
+            exit(1)
 
-    setup_jinja_env()
+        setup_jinja_env()
 
-    framework_dir = Path(args.framework_dir).resolve()
-    if not (framework_dir / 'schemas').exists():
-        print('The default ("../everest-framework") xor supplied (via --framework-dir) everest framework directory\n'
-              'doesn\'t contain an "schemas" directory and therefore does not seem to be valid.\n'
-              f'dir: {framework_dir}')
-        exit(1)
+        framework_dir = Path(args.framework_dir).resolve()
+        if not (framework_dir / 'schemas').exists():
+            print('The default ("../everest-framework") xor supplied (via --framework-dir) everest framework directory\n'
+                  'doesn\'t contain an "schemas" directory and therefore does not seem to be valid.\n'
+                  f'dir: {framework_dir}')
+            exit(1)
 
-    validators = helpers.load_validators(framework_dir / 'schemas')
+        validators = helpers.load_validators(framework_dir / 'schemas')
 
     args.action_handler(args)
 

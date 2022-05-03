@@ -233,6 +233,29 @@ def generate_some_uuids(count):
         print(uuid4())
 
 
+def generate_cpp_inline_representation(file_path: Path):
+    if not file_path.is_file():
+        raise Exception(f'File {file_path} does not exist.')
+
+    # in c style, each char ('0xxx', ) needs 6 characters,
+    # with a default indent of 4 and 120 linelength thats
+    CHARS_PER_LINE = (120 - 4) // 6
+
+    lines = []
+    with open(file_path, 'rb') as input:
+        while(True):
+            bytes = input.read1(CHARS_PER_LINE)
+            if not bytes:
+                break
+
+            lines.append(' '.join(["'\\x{:02x}',".format(byte) for byte in bytes]))
+
+    return {
+        'char_lines': lines,
+        'length': file_path.stat().st_size
+    }
+
+
 def __check_for_match(blocks_def, line, line_no, file_path):
     match = re.search(blocks_def['regex_str'], line)
     if not match:

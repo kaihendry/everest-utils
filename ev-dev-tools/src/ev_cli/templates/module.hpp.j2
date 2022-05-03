@@ -19,10 +19,15 @@
 {% endif %}
 namespace module {
 
+namespace {{ manifest_json.name }} {
+extern const char data[];
+const size_t len = {{ manifest_json.length }};
+}
+
 {% if configs %}
-
+//
 // config related structures
-
+//
 {% for impl in configs.implementations %}
 struct {{ impl.id }}Config {
     {% for item in impl.config %}

@@ -1,0 +1,10 @@
+{% from "helper_macros.j2" import print_spdx_line %}
+{{ print_spdx_line('Apache-2.0') }}
+
+namespace {{ namespace }}::{{ name }} {
+extern const char data[] = {
+    {% for line in char_lines %}
+    {{ line }}
+    {% endfor %}
+};
+}

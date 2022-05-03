@@ -7,6 +7,11 @@
 
 namespace everest::interface::{{ info.interface }} {
 
+namespace {{ interface_json.name }} {
+extern const char data[];
+const size_t len = {{ interface_json.length }};
+}
+
 struct Subscribes{
     Subscribes(Everest* ev, const Requirement& req) : _ev(ev), _req(req){};
     {% for var in vars %}

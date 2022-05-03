@@ -7,6 +7,11 @@
 
 namespace everest::interface::{{ info.interface }} {
 
+namespace {{ interface_json.name }} {
+extern const char data[];
+const size_t len = {{ interface_json.length }};
+}
+
 struct Publishers {
     Publishers(Everest* ev, const std::string& impl_id) : _ev(ev), _impl_id(impl_id) {};
     {% for var in vars %}
