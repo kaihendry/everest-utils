@@ -1,50 +1,47 @@
-{% from "helper_macros.j2" import print_spdx_line, result_type, cpp_type, var_to_cpp, call_cmd_signature, publish_var_signature %}
+{% from "helper_macros.j2" import print_spdx_line, unfold_result, unfold_argument, unfold_arguments %}
 {{ print_spdx_line('Apache-2.0') }}
 #ifndef {{ info.hpp_guard }}
 #define {{ info.hpp_guard }}
 
-#include <everest/utils/interface_defs.hpp>
+#include <functional>
+#include <string>
+
+#include <everest/generated_module_fwd.hpp>
 
 namespace everest::interface::{{ info.interface }} {
 
-namespace {{ interface_json.name }} {
-extern const char data[];
-const size_t len = {{ interface_json.length }};
-}
+extern std::string get_definition();
 
 struct Publishers {
-    Publishers(Everest* ev, const std::string& impl_id) : _ev(ev), _impl_id(impl_id) {};
+    Publishers(const ImplementationContext&);
     {% for var in vars %}
-    {{ publish_var_signature(var) }};
+    void publish_{{ var.name }}({% if var.json_type != 'null' %}{{ unfold_argument(var, false) }}{% endif %});
     {% endfor %}
 
 private:
-    Everest* _ev;
-    std::string _impl_id;
+    ImplementationContext ctx;
 };
 
 {% if cmds %}
 class Handlers {
 protected:
     {% for cmd in cmds %}
-    virtual {{ call_cmd_signature(cmd) }} = 0;
+    virtual {{ unfold_result(cmd.result) }}handle_{{ cmd.name }}{{ unfold_arguments(cmd.args) }} = 0;
     {% endfor %}
-    {% if vars %}
     Publishers* vars {};
-    {% endif %}
 
 private:
-    void do_register(Everest* ev{{ ', Publishers* vars' if vars }});
+    void do_register(const ImplementationContext&, Publishers*);
     friend class Implementation;
 };
 
 struct Callbacks {
     {% for cmd in cmds %}
-    std::function<{{ result_type(cmd.result) }}({% for arg in cmd.args %}{{ cpp_type(arg) }}{{ ', ' if not loop.last }}{% endfor %})> handle_{{ cmd.name }};
+    std::function<{{ unfold_result(cmd.result) }}{{ unfold_arguments(cmd.args)}}> handle_{{ cmd.name }};
     {% endfor %}
 
 private:
-    void do_register(Everest* ev);
+    void do_register(const ImplementationContext&);
     friend class Implementation;
 };
 
@@ -54,7 +51,7 @@ public:
     Implementation(Callbacks& callbacks) : callbacks(&callbacks){};
 
     // FIXME: (aw): this function is visible on the ImplementationList items
-    void do_register(Everest* ev, Publishers* vars);
+    void do_register(const ImplementationContext&, Publishers*);
 private:
     Handlers* handlers{nullptr};
     Callbacks* callbacks{nullptr};
@@ -64,7 +61,7 @@ private:
 class Implementation {
 public:
     Implementation(std::nullptr_t null) {};
-    void do_register(Everest* ev, Publishers* vars) {};
+    void do_register(const ImplementationContext&, Publishers* vars) {};
 };
 
 {% endif %}

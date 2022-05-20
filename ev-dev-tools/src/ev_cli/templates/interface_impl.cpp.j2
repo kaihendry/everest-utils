@@ -1,11 +1,13 @@
-{% from "helper_macros.j2" import print_spdx_line, cpp_type, var_to_cpp, var_to_any, call_cmd_signature, publish_var_signature %}
+{% from "helper_macros.j2" import print_spdx_line, unfold_argument, publish_var_signature %}
 {{ print_spdx_line('Apache-2.0') }}
 
 #include <generated/interface/{{ info.interface }}_impl.hpp>
 
-#include <everest/everest.hpp>
+#include <everest/generated_module.hpp>
 
 namespace everest::interface::{{ info.interface }} {
+
+Publishers::Publishers(const ImplementationContext& ctx) : ctx(ctx) {}
 
 {% for var in vars %}
 {% if loop.first %}
@@ -13,8 +15,13 @@ namespace everest::interface::{{ info.interface }} {
 // publish implementations
 //
 {% endif %}
-{{ publish_var_signature(var, "Publishers") }} {
-    _ev->publish_var(_impl_id, "{{ var.name }}", {% if var.json_type != 'null' %}{{ var_to_any(var, 'value')}}{% else %}boost::blank(){% endif %});
+void Publishers::publish_{{ var.name }}({% if var.json_type != 'null' %}{{ unfold_argument(var, False) }} value{% endif %}) {
+    static const auto& variable_type = ctx.module_peer.get_module().
+        get_variable_type_for_implementation(ctx.implementation_id, "{{ var.name }}");
+        
+    const auto value_json = nlohmann::json({{ 'value' if var.json_type != 'null' else 'nullptr' }});
+
+    generated::publish(ctx, variable_type, "{{ var.name }}", value_json);
 }
 
 {% endfor %}
@@ -22,22 +29,41 @@ namespace everest::interface::{{ info.interface }} {
 //
 // do_register implementations
 //
-void Handlers::do_register(Everest* ev{{ ', Publishers* vars' if vars }}) {
-    {% if vars %}
+void Handlers::do_register(const ImplementationContext& ctx, Publishers* vars) {
+    {% for cmd in cmds %}
+    generated::implement(ctx, "{{ cmd.name }}", [this, &ctx](const Arguments& args){
+        {{ 'return ' if cmd.result }} this->handle_{{ cmd.name }}(
+        {% for arg in cmd.args %}
+            generated::safe_cast_to_{{ arg.typename }}(args.at("{{ arg.name }}")){{ ',' if not loop.last }}
+        {% endfor %}
+        );
+        {{ 'return nullptr;' if not cmd.result }}
+    });
+    {% endfor %}
     this->vars = vars;
-    {% endif %}
-    // tbd
 }
 
-void Callbacks::do_register(Everest* ev) {
-    // tbd
+void Callbacks::do_register(const ImplementationContext& ctx) {
+    {% for cmd in cmds %}
+    if (!this->handle_{{ cmd.name }}) {
+        throw std::runtime_error("Command {{ cmd.name }} has not been implemented");
+    }
+    generated::implement(ctx, "{{ cmd.name }}", [handler = this->handle_{{ cmd.name }}, &ctx](const Arguments& args){
+        {{ 'return ' if cmd.result }} handler(
+        {% for arg in cmd.args %}
+            generated::safe_cast_to_{{ arg.typename }}(args.at("{{ arg.name }}")){{ ',' if not loop.last }}
+        {% endfor %}
+        );
+        {{ 'return nullptr;' if not cmd.result }}
+    });
+    {% endfor %}
 }
 
-void Implementation::do_register(Everest* ev, Publishers* vars) {
+void Implementation::do_register(const ImplementationContext& ctx, Publishers* vars) {
     if (handlers) {
-        handlers->do_register(ev{{ ', vars' if vars }});
+        handlers->do_register(ctx, vars);
     } else {
-        callbacks->do_register(ev);
+        callbacks->do_register(ctx);
     }
 }
 {% endif %}

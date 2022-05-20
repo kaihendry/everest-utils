@@ -1,52 +1,57 @@
-{% from "helper_macros.j2" import print_spdx_line, cpp_type, var_to_cpp, var_to_any, call_cmd_signature %}
+{% from "helper_macros.j2" import print_spdx_line, unfold_result, unfold_arguments %}
 {{ print_spdx_line('Apache-2.0') }}
 
 #include <generated/interface/{{ info.interface }}_req.hpp>
 
-#include <everest/everest.hpp>
-#include <everest/logging/logging.hpp>
-#include <everest/utils/conversions.hpp>
+#include <everest/generated_module.hpp>
 
 namespace everest::interface::{{ info.interface }} {
 
-{% for var in vars %}
-{% if loop.first %}
 //
 // subscribe implementations
 //
-{% endif %}
-void Subscribes::subscribe_{{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ cpp_type(var) }}{% endif %})>& listener) {
-    ValueCallback cb = [listener](const Value& value) {
+Subscribes::Subscribes(const RequirementContext& ctx) : ctx(ctx) {} 
+{% for var in vars %}
+
+std::function<void(void)> Subscribes::subscribe_{{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ var.cpp_type }}{% endif %})>& listener) {
+    static const auto& variable_type = ctx.module_peer.get_module().
+        get_variable_type_for_requirement(ctx.requirement_id, "{{ var.name }}");
+
+    return generated::subscribe(ctx, variable_type, "{{ var.name }}", [listener](const Value& value){
         {% if var.json_type != 'null' %}
-        auto native_value = {{ var_to_cpp(var) }}(value);
-        listener(native_value);
+        // FIXME (aw): need to do the conversion here should be defined in typed_module_peer
+        listener(generated::safe_cast_to_{{ var.typename }}(value));
         {% else %}
-        if (value.type() != typeid({{ cpp_type(var) }})) {
-            EVLOG(error) << "Callback for variable '{{ var.name }}' in interface '{{ info.interface }}' has wrong type!";
-        }
         listener();
         {% endif %}
-    };
-    _ev->subscribe_var(_req, "{{ var.name }}", cb);
+    });
 }
 
 {% endfor %}
-{% for cmd in cmds %}
-{% if loop.first %}
 //
 // call implementations
 //
-{% endif %}
-{{ call_cmd_signature(cmd, "Calls") }} {
-    Parameters args;
-    {% for arg in cmd.args %}
-    args["{{ arg.name }}"] = {{ var_to_any(arg, arg.name) }};
-    {% endfor %}
-    {% if cmd.result %}Result result = {% endif %}_ev->call_cmd(_req, "{{ cmd.name }}", args);
-    {% if cmd.result %}
-    auto retval = {{ var_to_cpp(cmd.result) }}(result.get());
+Calls::Calls(const RequirementContext& ctx) : ctx(ctx) {}
 
-    return retval;
+{% for cmd in cmds %}
+{{ unfold_result(cmd.result) }}Calls::call_{{ cmd.name }}{{ unfold_arguments (cmd.args) }} {
+    static const auto& command_type = ctx.module_peer.get_module().
+        get_command_type_for_requirement(ctx.requirement_id, "{{ cmd.name }}");
+    
+    {% if cmd.args|length == 0 %}
+    Arguments args = nullptr;
+    {% else %}
+    Arguments args = {
+        {% for arg in cmd.args %}
+        {"{{ arg.name }}", {{ arg.name }}},
+        {% endfor %}
+    };
+    {% endif %}
+
+    auto result = generated::call(ctx, command_type, "{{ cmd.name }}", args);
+
+    {% if cmd.result %}
+    return generated::safe_cast_to_{{ cmd.result.typename }}(result);
     {% endif %}
 }
 
@@ -54,9 +59,10 @@ void Subscribes::subscribe_{{ var.name }}(const std::function<void({% if var.jso
 //
 // requirement constructors
 //
-BootRequirement::BootRequirement(Everest* ev, const Requirement& req, const std::string& module_id) :
-    Subscribes(ev, req), module_id(module_id){};
+BootRequirement::BootRequirement(const RequirementContext& ctx) : Subscribes(ctx),
+    module_id(ctx.module_peer.get_module().id) {}
 
-RunRequirement::RunRequirement(Everest* ev, const Requirement& req, const std::string& module_id) :
-    Calls(ev, req), Subscribes(ev, req), module_id(module_id){};
+RunRequirement::RunRequirement(const RequirementContext& ctx) : Subscribes(ctx), Calls(ctx),
+    module_id(ctx.module_peer.get_module().id) {}
+
 }

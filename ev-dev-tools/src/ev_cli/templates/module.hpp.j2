@@ -1,7 +1,9 @@
-{% from "helper_macros.j2" import print_template_info, insert_block, cpp_type, print_spdx_line %}
+{% from "helper_macros.j2" import print_template_info, insert_block, print_spdx_line %}
 {{ print_spdx_line('Apache-2.0') }}
 #ifndef {{ info.hpp_guard }}
 #define {{ info.hpp_guard }}
+
+#include <everest/generated_module_fwd.hpp>
 
 {% if requires %}
 // interface headers for requirements
@@ -10,19 +12,16 @@
 {% endfor %}
 
 {% endif %}
-{% if provides %}
+{% if implementations %}
 // interface headers for provided implementations
-{% for impl in provides %}
+{% for impl in implementations %}
 #include <generated/interface/{{ impl.type }}_impl.hpp>
 {% endfor %}
 
 {% endif %}
 namespace module {
 
-namespace {{ manifest_json.name }} {
-extern const char data[];
-const size_t len = {{ manifest_json.length }};
-}
+extern std::string get_definition();
 
 {% if configs %}
 //
@@ -31,7 +30,7 @@ const size_t len = {{ manifest_json.length }};
 {% for impl in configs.implementations %}
 struct {{ impl.id }}Config {
     {% for item in impl.config %}
-    {{ cpp_type(item) }} {{ item.name }};
+    {{ item.cpp_type }} {{ item.name }};
     {% endfor %}
 };
 
@@ -40,18 +39,16 @@ struct ImplementationConfigs {
     {% for impl in configs.implementations %}
     {{ impl.id }}Config {{ impl.id }};
     {% endfor %}
-}
-
-{% endif %}
-{% endfor %}
-{% if configs.module %}
-struct ModuleConfig {
-    {% for item in configs.module %}
-    {{ cpp_type(item) }} {{ item.name }};
-    {% endfor %}
 };
 
 {% endif %}
+{% endfor %}
+struct ModuleConfig {
+    {% for item in configs.module %}
+    {{ item.cpp_type }} {{ item.name }};
+    {% endfor %}
+};
+
 struct Configs {
     {% if configs.implementations %}
     ImplementationConfigs implementation;
@@ -63,7 +60,7 @@ struct Configs {
 {% endif %}
 
 struct ImplementationList {
-    {% for impl in provides %}
+    {% for impl in implementations %}
     everest::interface::{{ impl.type }}::Implementation {{ impl.id }};
     {% endfor %}
 };
@@ -79,9 +76,12 @@ struct RunContext {
     everest::interface::{{ req.type }}::RunRequirement req_{{ req.id }};
     {% endif %}
     {% endfor %}
-    {% for impl in provides %}
+    {% for impl in implementations %}
     everest::interface::{{ impl.type }}::Publishers impl_{{ impl.id }};
     {% endfor %}
+    {% if info.enable_external_mqtt %}
+    everest::ExternalMQTT mqtt;
+    {% endif %}
     everest::ModuleInfo info;
 };
 
@@ -96,19 +96,15 @@ struct BootContext {
     everest::interface::{{ req.type }}::BootRequirement req_{{ req.id }};
     {% endif %}
     {% endfor %}
+    {% if info.enable_external_mqtt %}
+    everest::ExternalMQTT mqtt;
+    {% endif %}
     everest::ModuleInfo info;
 };
 
-using ModuleInit = std::function<ImplementationList&(BootContext&)>;
-using ModuleReady = std::function<void(RunContext&)>;
+using ModuleBase = everest::GeneratedModuleBase<BootContext, ImplementationList, RunContext>;
 
-class ModuleBase {
-public:
-    virtual ImplementationList mod_init(BootContext&) = 0;
-    virtual void mod_ready(RunContext&) = 0;
-};
-
-void load(int argc, char* argv[], ModuleBase&);
+void load(const char* module_id, ModuleBase&);
 
 }
 

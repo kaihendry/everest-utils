@@ -1,10 +1,18 @@
 {% from "helper_macros.j2" import print_spdx_line %}
 {{ print_spdx_line('Apache-2.0') }}
 
-namespace {{ namespace }}::{{ name }} {
-extern const char data[] = {
+#include <string>
+
+namespace {{ namespace }} {
+static size_t len = {{ length }};
+static const char data[] = {
     {% for line in char_lines %}
     {{ line }}
     {% endfor %}
 };
+
+extern std::string get_definition() {
+    return { data, len };
+}
+
 }

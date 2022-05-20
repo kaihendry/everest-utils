@@ -1,56 +1,18 @@
-{% macro cpp_type(type) -%}
-{% if type.is_variant -%}
-boost::variant<{{ type.cpp_type|join(', ') }}>
-{%- else -%}
-{{ type.cpp_type }}
-{%- endif %}
+{% macro unfold_result(type) -%}
+{{ type.cpp_type + ' ' if type else 'void ' }}
 {%- endmacro %}
 
-{% macro result_type(type) -%}
-{% if type -%}
-{{ cpp_type(type) }}
-{%- else -%}
-void
-{%- endif %}
+{% macro unfold_argument(arg, with_name=True, const=True) -%}
+{{ 'const ' if const }}{{ arg.cpp_type }}{{ '&' if arg.pass_by_reference }}{% if with_name %} {{ arg.name }}{% endif %}
 {%- endmacro %}
 
-{% macro var_to_any(var, name) -%}
-{% if var.is_variant -%}
-everest::variant_to_any({{ name }})
-{%- else -%}
-boost::any({{ name }})
-{%- endif %}
-{%- endmacro %}
-
-{% macro var_to_cpp(arg) -%}
-{% if arg.is_variant -%}
-everest::any_to_variant<{{ arg.cpp_type|join(', ')}}>
-{%- else -%}
-boost::any_cast<{{ arg.cpp_type }}>
-{%- endif %}
-{%- endmacro %}
-
-{% macro call_cmd_signature(cmd, class_name=None) -%}
-{{ result_type(cmd.result) }} {% if class_name %}{{ class_name }}::{% endif %}call_{{ cmd.name }}(
-{%- for arg in cmd.args -%}
-{{ cpp_type(arg) }} {{ arg.name }}{{ ', ' if not loop.last }}
+{% macro unfold_arguments(args, with_names=True, const=True) -%}
+(
+{%- for arg in args -%}
+{{ unfold_argument(arg, with_names, const) }}{{ ', ' if not loop.last }}
 {%- endfor -%}
 )
 {%- endmacro %}
-
-{% macro handle_cmd_signature(cmd, class_name=None) -%}
-{% if not class_name %}virtual {% endif -%}
-{{ result_type(cmd.result) }} {% if class_name %}{{ class_name }}::{% endif -%}
-handle_{{ cmd.name }}(
-{%- for arg in cmd.args -%}
-{{ cpp_type(arg) }}& {{ arg.name }}{{ ', ' if not loop.last }}
-{%- endfor -%}
-)
-{%- endmacro %}
-
-{% macro publish_var_signature(var, class_name=None) %}
-void {% if class_name %}{{ class_name }}::{% endif %}publish_{{ var.name }}({% if var.json_type != 'null' %}{{ cpp_type(var) }} value{% endif %})
-{% endmacro %}
 
 {% macro list_json_types(json_type) -%}
 {% if json_type is iterable and json_type is not string -%}

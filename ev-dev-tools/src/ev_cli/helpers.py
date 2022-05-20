@@ -66,7 +66,7 @@ def create_dummy_result(json_type) -> str:
             raise Exception(f'This json type "{type}" is not known or not implemented')
 
     if isinstance(json_type, list):
-        return '{}' # default initialization for variant
+        return '{}'  # default initialization for variant
     else:
         return primitive_to_sample_value(json_type)
 
@@ -100,14 +100,15 @@ def gather_git_info(repo):
     }
 
 
-cpp_type_map = {
-    "null": "boost::blank", # FIXME (aw): check whether boost::blank or boost::none is more appropriate here
-    "integer": "int",
-    "number": "double",
-    "string": "std::string",
-    "boolean": "bool",
-    "array": "types::Array",
-    "object": "types::Object",
+json_to_cpp_type_map = {
+    "null": {"cpp_type": "nullptr", "pass_by_reference": False},
+    "boolean": {"cpp_type": "bool", "pass_by_reference": False},
+    "integer": {"cpp_type": "int", "pass_by_reference": False},
+    "number": {"cpp_type": "double", "pass_by_reference": False},
+    "string": {"cpp_type": "std::string", "pass_by_reference": True},
+    "array": {"cpp_type": "types::Array", "pass_by_reference": True},
+    "object": {"cpp_type": "types::Object", "pass_by_reference": True},
+    "variant": {"cpp_type": "types::Variant", "pass_by_reference": True},
 }
 
 
@@ -143,21 +144,11 @@ def clang_format(config_file_path, file_info):
 def build_type_info(name, json_type):
     ti = {
         'name': name,
-        'is_variant': False,
-        'cpp_type': None,
-        'json_type': json_type
+        'json_type': json_type,
+        'typename': "variant" if isinstance(json_type, list) else json_type
     }
 
-    if isinstance(json_type, list):
-        ti['is_variant'] = True
-        ti['cpp_type'] = [cpp_type_map[e] for e in json_type if e != 'null']
-        ti['cpp_type'].sort()  # sort, so template generation might get reduced
-        # prepend boost::blank if type 'null' exists, so the variant
-        # gets default initialized with blank
-        if 'null' in json_type:
-            ti['cpp_type'].insert(0, cpp_type_map['null'])
-    else:
-        ti['cpp_type'] = cpp_type_map[json_type]
+    ti.update(json_to_cpp_type_map["variant" if isinstance(json_type, list) else json_type])
 
     return ti
 

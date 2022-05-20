@@ -1,13 +1,15 @@
-{% from "helper_macros.j2" import print_spdx_line, cpp_type, var_to_cpp, var_to_any, call_cmd_signature %}
+{% from "helper_macros.j2" import print_spdx_line, unfold_result, unfold_arguments %}
 {{ print_spdx_line('Apache-2.0') }}
 
 #include <generated/module/{{ info.name }}.hpp>
+
+#include <everest/logging/logging.hpp>
 
 namespace types = everest::types;
 
 namespace module {
 
-{% for impl in callable_provides %}
+{% for impl in callable_implementations %}
 {% if loop.first %}
 //
 // provided interface implementations
@@ -17,7 +19,7 @@ class {{ impl.type }}Impl : public everest::interface::{{ impl.type }}::Handlers
 public:
     {{ impl.type }}Impl(RunContext*& ctx) : ctx(ctx) {};
     {% for cmd in impl.tmpl.cmds %}
-    {{ call_cmd_signature(cmd) }} override {
+    {{ unfold_result(cmd.result) }}handle_{{ cmd.name }}{{ unfold_arguments(cmd.args) }} override {
         // your code for cmd {{ cmd.name }} goes here
         {% if cmd.result %}
         return {{ cmd.result.json_type|create_dummy_result }};
@@ -35,9 +37,9 @@ private:
 //
 class Module : public ModuleBase {
 private:
-    ImplementationList mod_init(BootContext& ctx) override {
+    ImplementationList init(BootContext& ctx) override {
         return {
-            {% for impl in provides %}
+            {% for impl in implementations %}
             {% if impl.is_callable %}
             {{ impl.id }},
             {% else %}
@@ -47,12 +49,23 @@ private:
         };
     };
 
-    void mod_ready(RunContext& ctx) override{
-        this->ctx = &ctx;
+    void setup(RunContext& ctx) override {
+        // NOTE: only use the RunContext for setting references or
+        // pointers to it (it will stay valid), do not execute any
+        // of its functions, unless you know what you do
+    }
+
+    void ready() override {
+        // from here on, it is safe to execute any functions of the
+        // previously supplied RunContext ctx
+        // do your custom module logic here, this function will run in 
+        // the original main's thread, if this function returns, the
+        // module will still continue to run, as long the mqtt io thread
+        // runs
     };
 
     RunContext* ctx;
-    {% for impl in callable_provides %}
+    {% for impl in callable_implementations %}
     {{ impl.type }}Impl {{ impl.id }}{ ctx };
     {% endfor %}
 };
@@ -60,8 +73,10 @@ private:
 }
 
 int main(int argc, char* argv[]) {
-    module::Module mod;
+    everest::logging::init(argv[2], argv[1]);
 
-    module::load(argc, argv, mod);
+    module::Module mod;
+    module::load(argv[1], mod);
+
     return 0;
 }

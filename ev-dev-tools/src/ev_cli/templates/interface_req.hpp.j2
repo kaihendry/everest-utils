@@ -1,46 +1,43 @@
-{% from "helper_macros.j2" import print_spdx_line, result_type, cpp_type, var_to_cpp, call_cmd_signature, publish_var_signature %}
+{% from "helper_macros.j2" import print_spdx_line, unfold_result, unfold_arguments, publish_var_signature %}
 {{ print_spdx_line('Apache-2.0') }}
 #ifndef {{ info.hpp_guard }}
 #define {{ info.hpp_guard }}
 
-#include <everest/utils/interface_defs.hpp>
+#include <functional>
+#include <string>
+
+#include <everest/generated_module_fwd.hpp>
 
 namespace everest::interface::{{ info.interface }} {
 
-namespace {{ interface_json.name }} {
-extern const char data[];
-const size_t len = {{ interface_json.length }};
-}
+extern std::string get_definition();
 
 struct Subscribes{
-    Subscribes(Everest* ev, const Requirement& req) : _ev(ev), _req(req){};
+    Subscribes(const RequirementContext&);
     {% for var in vars %}
-    void subscribe_{{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ cpp_type(var) }}{% endif %})>& listener);
+    std::function<void(void)> subscribe_{{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ var.cpp_type }}{% endif %})>& listener);
     {% endfor %}
-
 private:
-    Everest* _ev;
-    Requirement _req;
+    RequirementContext ctx;
 };
 
 struct Calls {
-    Calls(Everest* ev, const Requirement& req) : _ev(ev), _req(req){};
+    Calls(const RequirementContext&);
     {% for cmd in cmds %}
-    {{ call_cmd_signature(cmd) }};
+    {{ unfold_result(cmd.result) }}call_{{ cmd.name }}{{ unfold_arguments(cmd.args) }};
     {% endfor %}
 
 private:
-    Everest* _ev;
-    Requirement _req;
+    RequirementContext ctx;
 };
 
 struct BootRequirement : public Subscribes {
-    BootRequirement(Everest* ev, const Requirement& req, const std::string& module_id);
+    BootRequirement(const RequirementContext&);
     std::string module_id;
 };
 
 struct RunRequirement : public Subscribes, public Calls {
-    RunRequirement(Everest* ev, const Requirement& req, const std::string& module_id);
+    RunRequirement(const RequirementContext&);
     std::string module_id;
 };
 }

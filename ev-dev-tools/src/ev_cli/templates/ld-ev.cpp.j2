@@ -1,82 +1,112 @@
-{% from "helper_macros.j2" import print_template_info, var_to_cpp, print_spdx_line %}
+{% from "helper_macros.j2" import print_template_info, print_spdx_line %}
 {{ print_spdx_line('Apache-2.0') }}
 {{ print_template_info('4') }}
 
 #include <generated/module/{{ info.name }}.hpp>
 
-#include <everest/utils/module_adapter.hpp>
+#include <everest/generated_module.hpp>
 
 namespace intf = everest::interface;
 
-{% if configs %}
-static module::Configs setup_configs(const everest::ModuleConfigs& module_configs) {
-    module::Configs c;
+static auto parse_config_sets(const nlohmann::json& config_sets) {
+    module::Configs cfg;
 
     {% for impl in configs.implementations %}
     {% for item in impl.config %}
-    c.implementations.{{ impl.id }}.{{ item.name }} = boost::get<{{ item.cpp_type }}>(module_configs.at("{{ impl.id }}").at("{{ item.name }}"));
+    cfg.implementation.{{ impl.id }}.{{ item.name }} = everest::generated::safe_cast_to_{{ item.typename }}(
+        config_sets.at("implementations").at("{{ impl.id }}").at("{{ item.name }}"));
     {% endfor %}
 
     {% endfor %}
     {% for item in configs.module %}
-    c.module.{{ item.name }} = boost::get<{{ item.cpp_type }}>(module_configs.at("!module").at("{{ item.name }}"));
+    cfg.module.{{ item.name }} = everest::generated::safe_cast_to_{{ item.typename }}(config_sets.at("module").at("{{ item.name }}"));
     {% endfor %}
 
-    return c;
+    return cfg;
 }
 
-{% endif %}
 namespace module {
 
-void load(int argc, char* argv[], ModuleBase& module) {
+void load(const char* module_id, ModuleBase& module) {
 
-    auto ma_ctx = everest::instanciate_module(argc, argv);
-    
-    {% if configs %}
-    auto configs = setup_configs(ma_ctx.module_configs);
-    {% endif %}
-
-    const auto& cxns = ma_ctx.connections;
+    everest::Module::InterfaceMap interfaces = everest::InterfaceMapBuilder()
     {% for req in requires %}
-    everest::RequirementHelper<intf::{{ req.type }}::BootRequirement, intf::{{ req.type }}::RunRequirement> r_{{ req.id }}(ma_ctx.ev);
-    for (size_t idx = 0; idx < cxns.at("{{ req.id }}").size(); ++idx) {
-        r_{{ req.id }}.add({"{{ req.id }}", idx }, cxns.at("{{ req.id }}")[idx].at("module_id"));
-    }
+        .add("{{ req.type }}", intf::{{ req.type }}::get_definition())
+    {% endfor %}
+    {% for impl in implementations %}
+        .add("{{ impl.type }}", intf::{{ impl.type }}::get_definition())
+    {% endfor %}
+    ;
 
+    auto manifest = everest::schema::parse_module(get_definition());
+
+    auto module_info = everest::ModuleInfo {
+        "{{ info.name }}",
+        manifest.metadata.authors,
+        manifest.metadata.license,
+        module_id,
+    };
+
+    auto mod = everest::Module {
+        module_id,
+        everest::schema::parse_module(get_definition()),
+        std::move(interfaces),
+    };
+
+    auto module_peer = everest::ModulePeer(mod);
+
+    auto io_sync_exited = module_peer.spawn_io_sync_thread();
+
+    auto config = module_peer.say_hello();
+
+    auto config_sets = parse_config_sets(config.get_config_sets());
+
+    {% for req in requires %}
+    auto r_{{ req.id }} = everest::generated::RequirementHelper<intf::{{ req.type }}::BootRequirement, intf::{{ req.type }}::RunRequirement> {
+        module_peer,
+        config.get_fulfillments("{{ req.id }}"),
+        "{{ req.id }}",
+    };
     {% endfor %}
 
     BootContext boot_ctx {
-        {% if configs %}
-        configs,
-        {% endif %}
+        config_sets,
         {% for req in requires %}
-        r_{{ req.id }}.boot_requirements{{ '[0]' if not req.is_vector }},
+        r_{{ req.id }}.boot{{ '[0]' if not req.is_vector }},
         {% endfor %}
-        ma_ctx.info,
+        {% if info.enable_external_mqtt %}
+        everest::ExternalMQTT(module_peer),
+        {% endif %}
+        module_info,
     };
 
-    auto impls = module.mod_init(boot_ctx);
+    auto impls = module.init(boot_ctx);
 
     RunContext ctx {
-        {% if configs %}
-        configs,
-        {% endif %}
+        config_sets,
         {% for req in requires %}
-        r_{{ req.id }}.run_requirements{{ '[0]' if not req.is_vector }},
+        r_{{ req.id }}.run{{ '[0]' if not req.is_vector }},
         {% endfor %}
-        {% for impl in provides %}
-        intf::{{ impl.type }}::Publishers(ma_ctx.ev, "{{ impl.id }}"),
+        {% for impl in implementations %}
+        intf::{{ impl.type }}::Publishers(everest::ImplementationContext{module_peer, "{{ impl.id }}"}),
         {% endfor %}
-        ma_ctx.info,
+        {% if info.enable_external_mqtt %}
+        everest::ExternalMQTT(module_peer),
+        {% endif %}
+        module_info,
     };
 
-    {% for impl in provides %}
-    impls.{{ impl.id }}.do_register(ma_ctx.ev, &ctx.impl_{{ impl.id }});
+    {% for impl in implementations %}
+    impls.{{ impl.id }}.do_register(everest::ImplementationContext{module_peer, "{{ impl.id }}"}, &ctx.impl_{{ impl.id }});
     {% endfor %}
 
-    everest::connect_module(ma_ctx.ev, [&ctx, &module](){
-        module.mod_ready(ctx);
-    });
+    module.setup(ctx);
+
+    module_peer.init_done();
+
+    module.ready();
+
+    io_sync_exited.wait();
 }
 
 }

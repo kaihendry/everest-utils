@@ -92,8 +92,8 @@ def generate_tmpl_data_for_if(interface, if_def):
 
 
 def generate_tmpl_data_for_module(module, module_def):
-    provides = []
-    for impl, impl_info in module_def.get('provides', {}).items():
+    implementations = []
+    for impl, impl_info in module_def.get('implements', {}).items():
         config = []
         for conf_id, conf_info in impl_info.get('config', {}).items():
             type_info = helpers.build_type_info(conf_id, conf_info['type'])
@@ -102,7 +102,7 @@ def generate_tmpl_data_for_module(module, module_def):
         if_def, last_mtime = load_interface_defintion(impl_info['interface'])
         if_tmpl = generate_tmpl_data_for_if(impl_info['interface'], if_def)
 
-        provides.append({
+        implementations.append({
             'id': impl,
             'type': impl_info['interface'],
             'desc': impl_info['description'],
@@ -127,7 +127,7 @@ def generate_tmpl_data_for_module(module, module_def):
     module_config = [helpers.build_type_info(conf_id, conf_info['type'])
                      for conf_id, conf_info in module_def.get('config', {}).items()]
 
-    impl_configs = [impl for impl in provides if impl['config']]
+    impl_configs = [impl for impl in implementations if impl['config']]
 
     tmpl_data = {
         'info': {
@@ -136,14 +136,14 @@ def generate_tmpl_data_for_module(module, module_def):
             'desc': module_def['description'],
             'enable_external_mqtt': module_def.get('enable_external_mqtt', False)
         },
-        'provides': provides,
-        'publishing_provides': [impl for impl in provides if impl['is_publishing']],
-        'callable_provides': [impl for impl in provides if impl['is_callable']],
+        'implementations': implementations,
+        'publishing_implementations': [impl for impl in implementations if impl['is_publishing']],
+        'callable_implementations': [impl for impl in implementations if impl['is_callable']],
         'requires': requires,
         'configs': {
             'module': module_config,
             'implementations': impl_configs
-        } if (module_config or impl_configs) else None,
+        },
     }
 
     return tmpl_data
@@ -157,7 +157,7 @@ def construct_impl_file_paths(impl):
 
 def set_impl_specific_path_vars(tmpl_data, output_path):
     """Set cpp_file_rel_path and class_header vars to implementation template data."""
-    for impl in tmpl_data['provides']:
+    for impl in tmpl_data['implementations']:
         (impl['class_header'], impl['cpp_file_rel_path']) = construct_impl_file_paths(impl)
 
 
@@ -198,15 +198,6 @@ def generate_module_source_files(module_name, output_dir):
     # FIXME (aw): needs to be refactored
     template_mtime = Path(templates['mod_deps.cmake'].filename).stat().st_mtime
 
-    # mod_deps.cmake
-    loader_files.append({
-        'filename': 'mod_deps.cmake',
-        'path': output_dir / GENERATED_SOURCE_PREFIX / 'module' / module_name / 'mod_deps.cmake',
-        'printable_name': f'{module_name}/mod_deps.cmake',
-        'content': templates['mod_deps.cmake'].render(tmpl_data),
-        'last_mtime': max(mod_path.stat().st_mtime, template_mtime)
-    })
-
     # manifest.cpp
     loader_files.append({
         'filename': 'manifest.h',
@@ -214,6 +205,15 @@ def generate_module_source_files(module_name, output_dir):
         'printable_name': f'{module_name}/manifest.cpp',
         'content': templates['json_file.cpp'].render(tmpl_data['manifest_json']),
         'last_mtime': mod_path.stat().st_mtime
+    })
+
+    # mod_deps.cmake
+    loader_files.append({
+        'filename': 'mod_deps.cmake',
+        'path': output_dir / GENERATED_SOURCE_PREFIX / 'module' / module_name / 'mod_deps.cmake',
+        'printable_name': f'{module_name}/mod_deps.cmake',
+        'content': templates['mod_deps.cmake'].render(tmpl_data),
+        'last_mtime': max(mod_path.stat().st_mtime, template_mtime)
     })
 
     return loader_files
@@ -325,7 +325,7 @@ def generate_interface_source_files(interface, all_interfaces_flag, output_dir):
         'printable_name': impl_cpp_file.relative_to(output_dir)
     }
 
-    interface_json_file = output_dir / GENERATED_SOURCE_PREFIX / 'interface' / f'{interface}_json.cpp'
+    interface_json_file = output_dir / GENERATED_SOURCE_PREFIX / 'interface' / f'{interface}_def.cpp'
     if_parts['json'] = {
         'path': interface_json_file,
         'content': templates['json_file.cpp'].render(tmpl_data['interface_json']),

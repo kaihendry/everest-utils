@@ -5,7 +5,7 @@ list (APPEND MODULE_REQUIREMENTS
 )
 
 list (APPEND MODULE_IMPLEMENTATIONS
-    {% for impl in provides %}
+    {% for impl in implementations %}
     {{ impl.type }}
     {% endfor %}
 )
