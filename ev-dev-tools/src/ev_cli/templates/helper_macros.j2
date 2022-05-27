@@ -2,6 +2,14 @@
 {{ type.cpp_type + ' ' if type else 'void ' }}
 {%- endmacro %}
 
+{% macro unfold_result_ts(type) -%}
+{{ type.ts_type if type else 'void' }}
+{%- endmacro %}
+
+{% macro unfold_argument_ts(arg, with_name=True) -%}
+{{ arg.name if with_name }}: {{ arg.ts_type }}
+{%- endmacro %}
+
 {% macro unfold_argument(arg, with_name=True, const=True) -%}
 {{ 'const ' if const }}{{ arg.cpp_type }}{{ '&' if arg.pass_by_reference }}{% if with_name %} {{ arg.name }}{% endif %}
 {%- endmacro %}
@@ -12,6 +20,26 @@
 {{ unfold_argument(arg, with_names, const) }}{{ ', ' if not loop.last }}
 {%- endfor -%}
 )
+{%- endmacro %}
+
+{% macro unfold_arguments_ts(args, with_names=True) -%}
+{%- for arg in args -%}
+{{ unfold_argument_ts(arg, with_names) }}{{ ', ' if not loop.last }}
+{%- endfor -%}
+{%- endmacro %}
+
+{% macro unfold_arguments_as_dict_ts(args) -%}
+{
+{%- for arg in args -%}
+{{ arg.name }}{{ ', ' if not loop.last}}
+{%- endfor -%}
+}
+{%- endmacro %}
+
+{% macro unfold_arguments_from_dict_ts(args, dict_name) -%}
+{%- for arg in args -%}
+{{ dict_name}}.{{ arg.name }}{{ ', ' if not loop.last}}
+{%- endfor -%}
 {%- endmacro %}
 
 {% macro list_json_types(json_type) -%}

@@ -1,0 +1,107 @@
+{% from "helper_macros.j2" import print_spdx_line, unfold_result_ts, unfold_argument_ts, unfold_arguments_ts, unfold_arguments_as_dict_ts, unfold_arguments_from_dict_ts %}
+{{ print_spdx_line('Apache-2.0') }}
+import {
+  EverestModule,
+  ModuleConfig
+} from "everestjs";
+
+export { EverestLogger } from "everestjs"
+
+{% for intf in needed_interfaces|sort %}
+import * as intf_{{ intf }} from "../interface/{{ intf }}";
+{% endfor %}
+
+{% if configs %}
+type Config = {
+  module: {
+    {% for item in configs.module %}
+    {{ item.name }}: {{ item.ts_type }};
+    {% endfor %}
+  };
+  implementations: {
+    {% for impl in configs.implementations %}
+    {{ impl.id }}: {
+      {% for item in impl.config %}
+      {{ item.name }}: {{ item.ts_type }};
+      {% endfor %}
+    };
+    {% endfor %}
+  };
+};
+{% endif %}
+
+class RunContext {
+  {% if configs %}
+  config: Config;
+  {% endif %}
+  {% for req in requires %}
+  req_{{ req.id }}: intf_{{ req.type }}.RunRequirement<RunContext>{{ '[]' if req.is_vector }};
+  {% endfor %}
+  {% for impl in implementations %}
+  impl_{{ impl.id }}: intf_{{ impl.type }}.RunImplementation;
+  {% endfor %}
+
+  constructor(module: EverestModule, module_config: ModuleConfig) {
+    this.config = module_config.config_sets as Config; // FIXME (aw): is there a better way?
+    {% for req in requires %}
+
+    this.req_{{ req.id }} = module_config.connections.{{ req.id }}.map(
+      (fulfillment) => new intf_{{ req.type }}.RunRequirement({ fulfillment, module }, this)
+    ){{ '[0]' if not req.is_vector }};
+    {% endfor %}
+    {% for impl in implementations %}
+
+    this.impl_{{ impl.id }} = new intf_{{ impl.type }}.RunImplementation({
+      implementation_id: "{{ impl.id }}",
+      module,
+    });
+    {% endfor %}
+  }
+}
+
+export class BootContext {
+  {% if configs %}
+  config: Config;
+  {% endif %}
+  {% for req in requires %}
+  req_{{ req.id }}: intf_{{ req.type }}.BootRequirement<RunContext>{{ '[]' if req.is_vector }};
+  {% endfor %}
+  {% for impl in implementations %}
+  impl_{{ impl.id }}: intf_{{ impl.type }}.BootImplementation<RunContext>;
+  {% endfor %}
+
+  constructor(module: EverestModule, module_config: ModuleConfig, run_context: RunContext) {
+    this.config = run_context.config;
+    {% for req in requires %}
+
+    this.req_{{ req.id }} = module_config.connections.{{ req.id }}.map(
+      (fulfillment) => new intf_{{ req.type }}.BootRequirement({ fulfillment, module }, run_context)
+    ){{ '[0]' if not req.is_vector }};
+    {% endfor %}
+    {% for impl in implementations %}
+
+    this.impl_{{ impl.id }} = new intf_{{ impl.type }}.BootImplementation({
+      implementation_id: "{{ impl.id }}",
+      module,
+    }, run_context);
+    {% endfor %}
+  }
+};
+
+export type ModuleInitHandler = (boot_context: BootContext) => PromiseLike<void>|void;
+export async function boot(module_id: string, init_handler: ModuleInitHandler): Promise<RunContext> {
+  const module = new EverestModule({
+    module_id,
+    manifest_path: `${__dirname}/{{ info.name }}.json`,
+    interfaces_dir: `${__dirname}/../interface`,
+  });
+
+  const module_config = module.say_hello();
+
+  const run_context = new RunContext(module, module_config);
+  const boot_context = new BootContext(module, module_config, run_context);
+
+  await init_handler(boot_context);
+
+  return Promise.resolve(module.init_done()).then(() => run_context);
+}

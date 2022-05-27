@@ -1,0 +1,78 @@
+{% from "helper_macros.j2" import print_spdx_line, unfold_result_ts, unfold_argument_ts, unfold_arguments_ts, unfold_arguments_as_dict_ts, unfold_arguments_from_dict_ts %}
+{{ print_spdx_line('Apache-2.0') }}
+import {
+  EverestModule,
+  CommandHandler,
+  UnsubscriptionCallback,
+  RequirementContext,
+  ImplementationContext,
+} from "everestjs";
+
+{% for var in vars %}
+export type var_{{ var.name }}_handler<RunContextType> = (rc: RunContextType{{ ', ' + unfold_argument_ts(var) if var.json_type != 'null'}}) => void;
+{% endfor %}
+{% for cmd in cmds %}
+export type cmd_{{ cmd.name }}_handler<RunContextType> = (rc: RunContextType{{ ', ' if cmd.args }}{{ unfold_arguments_ts(cmd.args) }}) => {{ unfold_result_ts(cmd.result) }};
+{% endfor %}
+
+export class BootRequirement<RunContextType> {
+  {% for var in vars %}
+  subscribe_{{ var.name }}: (
+    handler: var_{{ var.name }}_handler<RunContextType>
+  ) => UnsubscriptionCallback;
+  {% endfor %}
+  constructor(ctx: RequirementContext, mod: RunContextType) {
+    {% for var in vars %}
+    this.subscribe_{{ var.name }} = (handler: var_{{ var.name }}_handler<RunContextType>) =>
+      ctx.module.subscribe_variable(ctx.fulfillment, "{{ var.name }}", (variable) => handler(mod, variable));
+    {% endfor %}
+  }
+}
+
+export class RunRequirement<ModuleContextType> extends BootRequirement<ModuleContextType> {
+  {% for cmd in cmds %}
+  call_{{ cmd.name }}: ({{ unfold_arguments_ts(cmd.args) }}) => {{ unfold_result_ts(cmd.result) }};
+  {% endfor %}
+
+  constructor(ctx: RequirementContext, mod: ModuleContextType) {
+    super(ctx, mod);
+    {% for cmd in cmds %}
+    this.call_{{ cmd.name }} = ({{ unfold_arguments_ts(cmd.args) }}) =>
+      ctx.module.call_command(ctx.fulfillment, "{{ cmd.name }}", {{ unfold_arguments_as_dict_ts(cmd.args) }});
+    {% endfor %}
+  }
+}
+
+export class BootImplementation<ModuleContextType> {
+  {% for cmd in cmds %}
+  implement_{{ cmd.name }}: (handler: cmd_{{ cmd.name }}_handler<ModuleContextType>) => void;
+  {% endfor %}
+
+  constructor(ctx: ImplementationContext, mod: ModuleContextType) {
+    {% for cmd in cmds %}
+    this.implement_{{ cmd.name }} = (handler: cmd_{{ cmd.name }}_handler<ModuleContextType>) => {
+      ctx.module.implement_command(
+        ctx.implementation_id,
+        "{{ cmd.name }}",
+        (value, resolve) => {
+          const result = handler(mod, {{ unfold_arguments_from_dict_ts(cmd.args, 'value') }});
+          Promise.resolve(result).then(resolve);          
+        }
+      );
+    };
+    {% endfor %}
+  } 
+}
+
+export class RunImplementation {
+  {% for var in vars %}
+  publish_{{ var.name }}: ({{ unfold_argument_ts(var) if var.json_type != 'null' }}) => void;
+  {% endfor %}
+
+  constructor(ctx: ImplementationContext) {
+    {% for var in vars %}
+    this.publish_{{ var.name }} = ({{ 'value' if var.json_type != 'null' }}) =>
+      ctx.module.publish_variable(ctx.implementation_id, "{{ var.name }}", {{ 'value' if var.json_type != 'null' else 'null'}});
+    {% endfor %}
+  }
+}

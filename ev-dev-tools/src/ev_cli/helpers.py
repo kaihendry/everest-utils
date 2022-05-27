@@ -111,6 +111,17 @@ json_to_cpp_type_map = {
     "variant": {"cpp_type": "types::Variant", "pass_by_reference": True},
 }
 
+json_to_ts_type_map = {
+    "null": {"ts_type": "void"},
+    "boolean": {"ts_type": "boolean"},
+    "integer": {"ts_type": "number"},
+    "number": {"ts_type": "number"},
+    "string": {"ts_type": "string"},
+    "array": {"ts_type": "any[]"},
+    "object": {"ts_type": "any"},
+    "variant": {"ts_type": "any"},
+}
+
 
 def clang_format(config_file_path, file_info):
     # check if we handle cpp and hpp files
@@ -149,6 +160,7 @@ def build_type_info(name, json_type):
     }
 
     ti.update(json_to_cpp_type_map["variant" if isinstance(json_type, list) else json_type])
+    ti.update(json_to_ts_type_map["variant" if isinstance(json_type, list) else json_type])
 
     return ti
 
@@ -404,16 +416,21 @@ def print_available_mod_files(mod_files):
             print(f'  {file_info["abbr"]}')
 
 
+def content_same_as_file(content, file: Path):
+    # FIXME (aw): probably most inefficient
+    return content == file.read_text()
+
+
 def write_content_to_file(file_info, strategy, only_diff=False):
     # strategy:
-    #   update: update only if dest older or not existent
-    #   force-update: update, even if dest newer
+    #   update-if-diff: only writes content out, if it differs from the existing
+    #   update: update, even if dest newer
     #   update-if-non-existent: update only if file does not exists
     #   create: create file only if it does not exist
     #   force-create: create file, even if it exists
     # FIXME (aw): we should have this as an enum
 
-    strategies = ['update', 'force-update', 'update-if-non-existent', 'create', 'force-create']
+    strategies = ['update-if-diff', 'update', 'update-if-non-existent', 'create', 'force-create']
 
     file_path = file_info['path']
     file_dir = file_path.parent
@@ -423,14 +440,16 @@ def write_content_to_file(file_info, strategy, only_diff=False):
 
     if only_diff:
         return __show_diff_for(file_info)
-
-    if strategy == 'update':
-        if file_path.exists() and file_path.stat().st_mtime > file_info['last_mtime']:
-            print(f'Skipping {printable_name} (up-to-date)')
-            return
-        method = 'Updating'
-    elif strategy == 'force-update':
-        method = 'Force-updating' if file_path.exists() else 'Creating'
+    if strategy == 'update-if-diff':
+        if file_path.exists():
+            if content_same_as_file(file_info['content'], file_path):
+                print(f'Skipping {printable_name} (unchanged)')
+                return
+            method = 'Updating'
+        else:
+            method = 'Creating'
+    elif strategy == 'update':
+        method = 'Updating' if file_path.exists() else 'Creating'
     elif strategy == 'force-create':
         method = 'Overwriting' if file_path.exists() else 'Creating'
     elif strategy == 'update-if-non-existent' or strategy == 'create':

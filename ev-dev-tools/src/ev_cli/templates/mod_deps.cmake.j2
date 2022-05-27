@@ -1,11 +1,11 @@
-list (APPEND MODULE_REQUIREMENTS
-    {% for req in requires %}
-    {{ req.type }}
+list (APPEND MODULE_REQUIRES
+    {% for req in requires|sort %}
+    {{ req }}
     {% endfor %}
 )
 
-list (APPEND MODULE_IMPLEMENTATIONS
-    {% for impl in implementations %}
-    {{ impl.type }}
+list (APPEND MODULE_IMPLEMENTS
+    {% for impl in implements|sort %}
+    {{ impl }}
     {% endfor %}
 )
