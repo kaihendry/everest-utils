@@ -18,3 +18,7 @@ RUN pip install \
     commentjson \
     coloredlogs \
     pyyaml
+
+ARG CACHE_DATE=2022-01-01
+RUN pip install \
+    git+https://github.com/EVerest/sphinx-multiversion.git@master
