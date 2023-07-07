@@ -44,6 +44,23 @@ public:
     {% endfor %}
     {% endif %}
 
+    {% if not errors %}
+    // This interface does not export any errors to subscribe to
+    {% else %}
+    // errors available for subscription
+    {% for error_type in errors %}
+    void subscribe_error_{{ error_type }}(const ErrorCallback& listener) {
+        ErrorCallback cb = [listener](const Error& error) {
+            listener(error);
+        };
+        _adapter->subscribe_error(_req, Everest::ErrorType::{{ error_type }}, cb);
+    }
+    {% if not loop.last %}
+
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+
     {% if not cmds %}
     // this interface does not export any commands to call
     {% else %}

@@ -41,6 +41,17 @@ public:
     {% endfor %}
     {% endif %}
 
+    {% if not errors %}
+    // no errors defined for this interface
+    {% else %}
+    // raise functions for errors
+    {% for error_type in errors %}
+    void raise_{{ error_type }}(Everest::ErrorClass& error) {
+        _ev->raise_error(_name, Everest::ErrorType::{{ error_type }}, error);
+    }
+    {% endfor %}
+    {% endif %}
+
 protected:
     {% if not cmds %}
     // no commands defined for this interface

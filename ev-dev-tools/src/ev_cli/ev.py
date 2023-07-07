@@ -75,6 +75,11 @@ def generate_tmpl_data_for_if(interface, if_def, type_file):
 
         vars.append(type_info)
 
+    errors = []
+    print(if_def.get('errors', []))
+    for error in if_def.get('errors', []):
+        errors.append(error)
+
     cmds = []
     for cmd, cmd_info in if_def.get('cmds', {}).items():
         args = []
@@ -127,7 +132,8 @@ def generate_tmpl_data_for_if(interface, if_def, type_file):
         'enums': enums,
         'types': types,
         'vars': vars,
-        'cmds': cmds
+        'cmds': cmds,
+        'errors': errors,
     }
 
     return tmpl_data
@@ -179,6 +185,7 @@ def generate_tmpl_data_for_module(module, module_def):
             'module_config': module_config,
             'ld_ev_header': 'ld-ev.hpp',
             'enable_external_mqtt': module_def.get('enable_external_mqtt', False),
+            'enable_error_manager': module_def.get('enable_error_manager', False),
             'enable_telemetry': module_def.get('enable_telemetry', False)
         },
         'provides': provides,
