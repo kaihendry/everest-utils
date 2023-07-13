@@ -96,15 +96,11 @@ std::vector<Everest::cmd> everest_register(const json& connections) {
     {% if info.enable_external_mqtt %}
     static Everest::MqttProvider mqtt_provider(adapter);
     {% endif %}
-    {% if info.enable_error_manager %}
-    static Everest::ErrorManager error_manager(adapter);
-    {% endif %}
     static Everest::TelemetryProvider telemetry_provider(adapter);
 
     static {{ info.class_name }} module(
     module_info,
     {%- if info.enable_external_mqtt %}mqtt_provider, {% endif -%}
-    {%- if info.enable_error_manager %}error_manager, {% endif -%}
     {%- if info.enable_telemetry %}telemetry_provider, {% endif -%}
     {%- for impl in provides -%}
     std::move(p_{{ impl.id }}){{ ', ' }}
