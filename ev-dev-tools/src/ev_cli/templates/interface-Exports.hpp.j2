@@ -20,7 +20,8 @@ public:
     {% else %}
     // variables available for subscription
     {% for var in vars %}
-    void subscribe_{{ var.name }}(const std::function<void({% if var.json_type != 'null' %}{{ cpp_type(var) }}{% endif %})>& listener) {
+    void subscribe_{{ var.name }}(
+        const std::function<void({% if var.json_type != 'null' %}{{ cpp_type(var) }}{% endif %})>& listener) {
         ValueCallback cb = [listener](const Value& value) {
         {% if 'object_type' in var %}
             listener(value);
@@ -49,11 +50,12 @@ public:
     {% else %}
     // errors available for subscription
     {% for error_type in errors %}
-    void subscribe_error_{{ error_type }}(const ErrorCallback& listener) {
-        ErrorCallback cb = [listener](const Error& error) {
-            listener(error);
-        };
-        _adapter->subscribe_error(_req, Everest::ErrorType::{{ error_type }}, cb);
+    void subscribe_error_{{ error_type }}(
+        const ErrorCallback& error_listener,
+        const ErrorCallback& error_cleared_listener
+    ) {
+        _adapter->subscribe_error(_req, Everest::ErrorType::{{ error_type }}, error_listener);
+        _adapter->subscribe_error_cleared(_req, Everest::ErrorType::{{ error_type }}, error_cleared_listener);
     }
     {% if not loop.last %}
 
