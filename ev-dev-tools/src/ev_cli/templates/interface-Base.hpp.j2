@@ -6,6 +6,8 @@
 {{ print_template_info('3') }}
 
 #include <framework/ModuleAdapter.hpp>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_io.hpp>
 
 #include "Types.hpp"
 
@@ -46,13 +48,20 @@ public:
     {% else %}
     // raise functions for errors
     {% for error_type in errors %}
-    void raise_{{ error_type }}(const Everest::ErrorClass& error) {
-        _ev->raise_error(_name, Everest::ErrorType::{{ error_type }}, error);
+    boost::uuids::uuid raise_{{ error_type }}(const std::string& message) {
+        return _ev->raise_error(
+            _name,
+            Everest::Error::error_type_to_string(Everest::ErrorType::{{ error_type }}),
+            message
+        );
     }
     {% endfor %}
-    void clear_error(const uint& uid) {
-        _ev->clear_error(_name, uid);
+    void request_clear_error(const boost::uuids::uuid& uuid) {
+        _ev->request_clear_error(_name, boost::uuids::to_string(uuid));
     }
+    {% endif %}
+
+    {% if not cmds %}
     {% endif %}
 
 protected:
